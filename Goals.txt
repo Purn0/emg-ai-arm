@@ -1,0 +1,102 @@
+PROJECT BRIEF (FINAL VERSION)
+Title (you can reuse this for proposal/thesis)
+
+AI-Based Surface EMG Intent Decoding for Multi-DoF Robotic Arm Control
+
+Problem Statement
+
+Upper-limb amputees often rely on limited, non-intuitive prosthetic controls. Surface electromyography (sEMG) provides a non-invasive method to decode muscle intent, but robust, low-cost, multi-DoF control remains challenging due to noise, signal drift, and user variability.
+
+Objective
+
+To design and implement a low-cost, real-time sEMG-based human–machine interface that decodes user intent using AI and controls a 6-DoF robotic arm, with emphasis on robustness, low latency, and cross-user generalization.
+
+Core Contributions
+
+Low-cost custom analog sEMG acquisition system
+
+Real-time AI-based intent decoding
+
+Multi-DoF robot arm control pipeline
+
+Evaluation across multiple users and sessions
+
+Fully reproducible software + dataset pipeline
+
+
+SYSTEM OVERVIEW
+Muscle Activity
+   ↓
+ECG Electrodes
+   ↓
+Analog Front-End (AD620 + filters)
+   ↓
+Arduino Nano/Uno (ADC, 200 Hz)
+   ↓
+USB Serial
+   ↓
+PC (Python)
+   ├── Preprocessing
+   ├── Feature Extraction
+   ├── AI Model
+   ├── State Machine
+   ↓
+6-DoF Robotic Arm
+
+FINAL SYSTEM SPECIFICATIONS
+Hardware
+
+MCU: Arduino Nano / Uno
+
+EMG Channels: 2
+
+Electrodes: Disposable ECG electrodes
+
+Sampling Rate: 200 Hz (envelope)
+
+Power: Battery powered (important)
+
+Software
+
+Language: Python
+
+ML: SVM / Random Forest → CNN (later)
+
+Control: State machine + inverse kinematics
+
+Communication: USB serial
+
+Control Outputs
+
+Open / Close claw
+
+Wrist rotate (L/R)
+
+Wrist up / down
+
+Arm up / down
+
+Arm left / right
+(+ speed via EMG amplitude)
+
+MILESTONES (8-MONTH PLAN)
+Month	Goal
+1	Software pipeline + fake EMG
+2	Analog EMG circuit + validation
+3	Dataset collection + baseline ML
+4	Real-time arm control
+5	Robustness experiments
+6	Advanced ML + adaptation
+7	Thesis + paper writing
+8	Demo + defense
+EVALUATION METRICS (IMPORTANT FOR THESIS)
+
+Classification accuracy
+
+Latency (ms)
+
+Stability (false activations/min)
+
+Cross-user accuracy
+
+Cross-session performance
