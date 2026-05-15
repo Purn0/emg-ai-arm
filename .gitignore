@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model artifacts & data (track in releases, not in repo)
+*.joblib
+*.pkl
+*.pth
+*.pt
+*.h5
+*.onnx
+emg_ai_arm/models/*.joblib
+emg_ai_arm/data/raw/*
+emg_ai_arm/data/windows/*
+!emg_ai_arm/data/raw/.gitkeep
+!emg_ai_arm/data/windows/.gitkeep
+
+# Logs and experiment outputs
+*.log
+runs/
+logs/
+results/
+
+# OS
+Thumbs.db
+desktop.ini
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+
+# Secrets
+.env
+*.secret
