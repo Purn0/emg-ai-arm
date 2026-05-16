@@ -1,20 +1,4 @@
-"""
-Tab 2 — cue-based training session recorder.
-
-User picks how many trials per class and the duration of each phase.
-The tab then runs through a sequence of trials. For each trial the user
-sees:
-
-    READY  →  CUE: <class>  →  RECORDING  →  REST
-
-During the RECORDING phase, every window the stream worker delivers is
-labelled with the current class and appended to the in-memory dataset.
-
-When the session ends, the dataset is saved to
-`data/windows/session_<timestamp>.npz`, and a "Train RF" button kicks
-off a quick fit so the user can immediately see whether the data is
-separable.
-"""
+"""Tab 2 - cue-based training session recorder."""
 
 from __future__ import annotations
 
@@ -26,31 +10,20 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QComboBox,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QProgressBar,
-    QPushButton,
-    QSpinBox,
-    QVBoxLayout,
-    QWidget,
+    QComboBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
+    QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from emg_ai_arm.utils.config import WINDOWS_DIR
 
-# Class IDs match the emulator and the controller.
 CLASS_NAMES = {0: "REST", 1: "CH1 (close / left / up)",
                2: "CH2 (open / right / down)", 3: "BOTH (mode switch)"}
 
 
 class TrainerTab(QWidget):
-    """Run cue-based trials and append labelled windows to a dataset."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # ---- Top: parameters ----
         params = QGridLayout()
         params.addWidget(QLabel("Trials per class:"), 0, 0)
         self.spin_trials = QSpinBox()
@@ -75,13 +48,13 @@ class TrainerTab(QWidget):
         self.combo_order.addItems(["randomised", "fixed 0,1,2,3"])
         params.addWidget(self.combo_order, 1, 1)
 
-        # ---- Middle: cue display ----
         self.cue_label = QLabel("Press Start to begin")
         self.cue_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cue_label.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
-        self.cue_label.setMinimumHeight(120)
+        self.cue_label.setMinimumHeight(140)
         self.cue_label.setStyleSheet(
-            "background: #f6f6f6; border: 2px solid #ddd; border-radius: 12px;"
+            "background: #26262b; color: #e8e8ea; "
+            "border: 2px solid #3a3a44; border-radius: 14px;"
         )
 
         self.phase_label = QLabel("")
@@ -92,7 +65,6 @@ class TrainerTab(QWidget):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
 
-        # ---- Bottom: controls + summary ----
         self.btn_start = QPushButton("Start session")
         self.btn_stop = QPushButton("Abort")
         self.btn_stop.setEnabled(False)
@@ -111,7 +83,6 @@ class TrainerTab(QWidget):
         self.summary = QLabel("0 windows collected.")
         self.summary.setAlignment(Qt.AlignmentFlag.AlignRight)
 
-        # ---- Layout ----
         v = QVBoxLayout(self)
         v.addLayout(params)
         v.addSpacing(8)
@@ -122,41 +93,31 @@ class TrainerTab(QWidget):
         v.addLayout(ctrl_row)
         v.addWidget(self.summary)
 
-        # ---- State ----
-        self._trials: list[int] = []
+        self._trials = []
         self._idx = 0
-        self._phase: str = "idle"           # "ready", "action", "rest", "done"
+        self._phase = "idle"
         self._phase_t0 = 0.0
         self._action_sec = 3.0
         self._rest_sec = 2.0
-        self._X: list[np.ndarray] = []
-        self._y: list[int] = []
+        self._X = []
+        self._y = []
 
         self._tick = QTimer(self)
         self._tick.timeout.connect(self._on_tick)
 
-        # Signals
         self.btn_start.clicked.connect(self._start)
         self.btn_stop.clicked.connect(self._abort)
         self.btn_save.clicked.connect(self._save_dataset)
         self.btn_train.clicked.connect(self._train_rf)
 
-    # ------------------------------------------------------------------- #
-    # Public slot — called from the shared stream worker
-    # ------------------------------------------------------------------- #
-
-    def on_window(self, window: np.ndarray, _true_label: int) -> None:
+    def on_window(self, window, _true_label):
         if self._phase == "action":
             cls = self._trials[self._idx]
             self._X.append(window.copy())
             self._y.append(int(cls))
-            self.summary.setText(f"{len(self._X)} windows collected.")
+            self.summary.setText(str(len(self._X)) + " windows collected.")
 
-    # ------------------------------------------------------------------- #
-    # Session control
-    # ------------------------------------------------------------------- #
-
-    def _start(self) -> None:
+    def _start(self):
         n = int(self.spin_trials.value())
         self._action_sec = float(self.spin_action.value())
         self._rest_sec = float(self.spin_rest.value())
@@ -180,49 +141,45 @@ class TrainerTab(QWidget):
         self._enter_phase("ready")
         self._tick.start(50)
 
-    def _abort(self) -> None:
+    def _abort(self):
         self._tick.stop()
         self._phase = "idle"
         self.cue_label.setText("Aborted")
-        self.cue_label.setStyleSheet(
-            "background: #fff3f3; border: 2px solid #d62728; border-radius: 12px;"
-        )
+        self._set_cue_colour("#3a1f22", "#d62728")
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_save.setEnabled(len(self._X) > 0)
 
-    def _enter_phase(self, phase: str) -> None:
+    def _enter_phase(self, phase):
         self._phase = phase
         self._phase_t0 = time.perf_counter()
 
         if phase == "ready":
             cls = self._trials[self._idx]
-            self.cue_label.setText(f"Get ready: {CLASS_NAMES[cls]}")
-            self._set_cue_colour("#fff8d6", "#caa400")
+            self.cue_label.setText("Get ready: " + CLASS_NAMES[cls])
+            self._set_cue_colour("#3a2f1a", "#e0af68")
             self.phase_label.setText(
-                f"Trial {self._idx + 1}/{len(self._trials)} — countdown 1.0 s"
+                "Trial " + str(self._idx + 1) + "/" + str(len(self._trials))
+                + " - countdown 1.0 s"
             )
-
         elif phase == "action":
             cls = self._trials[self._idx]
-            self.cue_label.setText(f"GO!  →  {CLASS_NAMES[cls]}")
-            self._set_cue_colour("#dfffe0", "#2ca02c")
+            self.cue_label.setText("GO!   " + CLASS_NAMES[cls])
+            self._set_cue_colour("#1f3a26", "#9ece6a")
             self.phase_label.setText(
-                f"Hold contraction for {self._action_sec:.0f} s"
+                "Hold contraction for " + str(int(self._action_sec)) + " s"
             )
-
         elif phase == "rest":
             self.cue_label.setText("Rest")
-            self._set_cue_colour("#eef1ff", "#5566cc")
-            self.phase_label.setText(f"Relax for {self._rest_sec:.0f} s")
-
+            self._set_cue_colour("#1f2a3a", "#7aa2f7")
+            self.phase_label.setText("Relax for " + str(int(self._rest_sec)) + " s")
         elif phase == "done":
             self._tick.stop()
             self.cue_label.setText("Session complete")
-            self._set_cue_colour("#f0fff0", "#2ca02c")
+            self._set_cue_colour("#1f3a30", "#4ec9b0")
             self.phase_label.setText(
-                f"Collected {len(self._X)} windows across "
-                f"{len(set(self._y))} classes."
+                "Collected " + str(len(self._X)) + " windows across "
+                + str(len(set(self._y))) + " classes."
             )
             self.progress.setValue(100)
             self.btn_start.setEnabled(True)
@@ -230,16 +187,15 @@ class TrainerTab(QWidget):
             self.btn_save.setEnabled(len(self._X) > 0)
             self.btn_train.setEnabled(len(self._X) > 0)
 
-    def _set_cue_colour(self, bg: str, border: str) -> None:
+    def _set_cue_colour(self, bg, border):
         self.cue_label.setStyleSheet(
-            f"background: {bg}; border: 2px solid {border}; "
-            "border-radius: 12px;"
+            "background: " + bg + "; color: #e8e8ea; "
+            "border: 2px solid " + border + "; border-radius: 14px;"
         )
 
-    def _on_tick(self) -> None:
-        if self._phase == "idle" or self._phase == "done":
+    def _on_tick(self):
+        if self._phase in ("idle", "done"):
             return
-
         now = time.perf_counter()
         elapsed = now - self._phase_t0
 
@@ -247,12 +203,10 @@ class TrainerTab(QWidget):
             self.progress.setValue(int(elapsed / 1.0 * 100))
             if elapsed >= 1.0:
                 self._enter_phase("action")
-
         elif self._phase == "action":
             self.progress.setValue(int(elapsed / self._action_sec * 100))
             if elapsed >= self._action_sec:
                 self._enter_phase("rest")
-
         elif self._phase == "rest":
             self.progress.setValue(int(elapsed / self._rest_sec * 100))
             if elapsed >= self._rest_sec:
@@ -262,29 +216,23 @@ class TrainerTab(QWidget):
                 else:
                     self._enter_phase("ready")
 
-    # ------------------------------------------------------------------- #
-    # Saving + training
-    # ------------------------------------------------------------------- #
-
-    def _save_dataset(self) -> Path:
+    def _save_dataset(self):
         if not self._X:
             return Path()
         X = np.stack(self._X, axis=0)
         y = np.asarray(self._y, dtype=np.int64)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = WINDOWS_DIR / f"session_{stamp}.npz"
+        out = WINDOWS_DIR / ("session_" + stamp + ".npz")
         np.savez_compressed(str(out), X=X, y=y, fs=200, win_sec=0.2)
-        self.summary.setText(f"Saved {len(y)} windows to {out.name}")
+        self.summary.setText("Saved " + str(len(y)) + " windows to " + out.name)
         return out
 
-    def _train_rf(self) -> None:
-        # Save first, then call train_ml with the new dataset.
+    def _train_rf(self):
         path = self._save_dataset()
         if not path:
             return
         try:
             from sklearn.ensemble import RandomForestClassifier
-            from sklearn.metrics import classification_report
             from sklearn.model_selection import train_test_split
             from emg_ai_arm.features.extract_features import extract_features
 
@@ -302,7 +250,9 @@ class TrainerTab(QWidget):
             )
             clf.fit(X_tr, y_tr)
             acc = clf.score(X_te, y_te)
-            self.summary.setText(f"RF test accuracy: {acc * 100:.1f}%  "
-                                 f"({len(y_te)} test windows)")
+            self.summary.setText(
+                "RF test accuracy: " + str(round(acc * 100, 1)) + "%  ("
+                + str(len(y_te)) + " test windows)"
+            )
         except Exception as e:
-            self.summary.setText(f"Training failed: {e}")
+            self.summary.setText("Training failed: " + str(e))

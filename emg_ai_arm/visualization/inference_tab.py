@@ -163,6 +163,11 @@ class InferenceTab(QWidget):
 
         cmd = self._ctrl.update(pred, strength)
 
+        # Boost the speed passed to the arm so motion is clearly visible
+        # under the emulator. Real EMG strength values tend to be larger,
+        # so this multiplier can be reduced later when real data arrives.
+        arm_speed = max(0.6, min(1.0, strength * 1.8))
+
         self.pred_label.setText(f"Prediction: {pred} ({CLASS_NAMES.get(pred, '?')})")
         self.strength_label.setText(f"Strength: {strength:.2f}")
         self.cmd_label.setText(f"Command: {cmd}")
@@ -170,7 +175,7 @@ class InferenceTab(QWidget):
 
         self.arm.set_mode(self._ctrl.mode_names[self._ctrl.mode])
         self.arm.set_command(cmd)
-        self.arm.apply_command(cmd, speed=strength)
+        self.arm.apply_command(cmd, speed=arm_speed)
 
         # Maintain a small rolling command log
         self._history.append(cmd)
