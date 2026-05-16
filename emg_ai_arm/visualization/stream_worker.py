@@ -1,10 +1,4 @@
-"""
-Background worker that produces (window, label) pairs at a steady rate
-and forwards them to the GUI via Qt signals.
-
-A single worker is shared by all three tabs (signal viewer, trainer,
-inference) so we only read the data source once.
-"""
+"""Background worker producing fast sample chunks and slow classification windows."""
 
 from __future__ import annotations
 
@@ -14,68 +8,65 @@ from typing import Optional
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from emg_ai_arm.emulator.fake_emg import stream_sequence
+from emg_ai_arm.emulator.fake_emg import stream_sequence, FS, SAMPLES
+
+
+CHUNK_SAMPLES = 5
 
 
 class StreamWorker(QThread):
-    """
-    Emits a new EMG window on the `window_ready` signal.
-
-    Parameters
-    ----------
-    source : "fake" or "serial"
-        Where to read from. "serial" requires a working SerialEMG.
-    interval_sec : float
-        Time between windows. Defaults to 0.2 s (matches fake_emg).
-    """
-
-    window_ready = pyqtSignal(np.ndarray, int)  # (window, true_label_or_-1)
+    samples_ready = pyqtSignal(np.ndarray)
+    window_ready = pyqtSignal(np.ndarray, int)
     error = pyqtSignal(str)
 
-    def __init__(
-        self,
-        source: str = "fake",
-        interval_sec: float = 0.2,
-        port: Optional[str] = None,
-        parent=None,
-    ):
+    def __init__(self, source="fake", port=None, parent=None):
         super().__init__(parent)
         self.source = source
-        self.interval_sec = float(interval_sec)
         self.port = port
         self._running = False
+        self.fs = FS
+        self.win_samples = SAMPLES
 
-    def stop(self) -> None:
+    def stop(self):
         self._running = False
 
-    def run(self) -> None:
+    def run(self):
         self._running = True
         gen = None
         try:
             if self.source == "fake":
                 gen = stream_sequence()
             elif self.source == "serial":
-                # Lazy import so users without pyserial can still run the GUI
                 from emg_ai_arm.acquisition.serial_reader import serial_windows
                 if not self.port:
                     raise RuntimeError("Serial source requires a COM port.")
                 gen = serial_windows(self.port)
             else:
-                raise ValueError(f"Unknown source: {self.source!r}")
+                raise ValueError("Unknown source: " + repr(self.source))
+
+            sample_period = 1.0 / float(self.fs)
+            chunk_period = sample_period * CHUNK_SAMPLES
 
             while self._running:
-                t0 = time.perf_counter()
                 window, label = next(gen)
-                # Serial reader yields (window, None); coerce to int sentinel
                 lab_int = int(label) if label is not None else -1
-                self.window_ready.emit(window.astype(np.float32), lab_int)
+                window = window.astype(np.float32)
 
-                # Pace the loop to the requested interval (for the emulator).
-                # Serial naturally paces itself; the sleep just smooths jitter.
-                elapsed = time.perf_counter() - t0
-                remaining = self.interval_sec - elapsed
-                if remaining > 0:
-                    time.sleep(remaining)
+                n = window.shape[0]
+                for start in range(0, n, CHUNK_SAMPLES):
+                    if not self._running:
+                        break
+                    end = min(start + CHUNK_SAMPLES, n)
+                    chunk = window[start:end]
+                    t0 = time.perf_counter()
+                    self.samples_ready.emit(chunk.copy())
+                    elapsed = time.perf_counter() - t0
+                    remaining = chunk_period - elapsed
+                    if remaining > 0:
+                        time.sleep(remaining)
+
+                if self._running:
+                    self.window_ready.emit(window, lab_int)
 
         except StopIteration:
             pass

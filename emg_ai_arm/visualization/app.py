@@ -1,41 +1,14 @@
-"""
-Main PyQt6 entry point for the EMG-AI-Arm GUI.
-
-Usage
------
-    python -m emg_ai_arm.visualization.app
-
-Three tabs share a single background StreamWorker:
-
-    1. Live signal     — scrolling 2-channel plot.
-    2. Trainer         — cue-based labelled-window recording + RF training.
-    3. Inference + Arm — runs a trained model and animates the virtual arm.
-
-A top toolbar lets you pick the data source (fake emulator / Arduino
-serial) and start / stop the stream. Everything that talks to the
-stream listens to `worker.window_ready` and reacts in its own slot.
-"""
+"""Main PyQt6 entry point for the EMG-AI-Arm GUI."""
 
 from __future__ import annotations
 
 import sys
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QHBoxLayout,
-    QInputDialog,
-    QLabel,
-    QMainWindow,
-    QMessageBox,
-    QPushButton,
-    QStatusBar,
-    QTabWidget,
-    QToolBar,
-    QVBoxLayout,
-    QWidget,
+    QApplication, QComboBox, QInputDialog, QLabel, QMainWindow,
+    QMessageBox, QPushButton, QStatusBar, QTabWidget, QToolBar,
 )
 
 from emg_ai_arm.visualization.inference_tab import InferenceTab
@@ -44,29 +17,83 @@ from emg_ai_arm.visualization.stream_worker import StreamWorker
 from emg_ai_arm.visualization.trainer_tab import TrainerTab
 
 
+DARK_STYLESHEET = """
+QTabWidget::pane { border: 1px solid #2a2a30; top: -1px; }
+QTabBar::tab {
+    background: #1e1e22; color: #b0b0b6;
+    padding: 8px 18px; border: 1px solid #2a2a30; border-bottom: none;
+}
+QTabBar::tab:selected {
+    background: #26262b; color: #e8e8ea;
+    border-bottom: 2px solid #4ec9b0;
+}
+QPushButton {
+    background: #2a2a30; color: #e8e8ea;
+    border: 1px solid #3a3a44; padding: 6px 14px; border-radius: 4px;
+}
+QPushButton:hover { background: #34343c; }
+QPushButton:disabled { color: #6a6a72; background: #232328; }
+QComboBox, QSpinBox {
+    background: #26262b; color: #e8e8ea;
+    border: 1px solid #3a3a44; padding: 4px 8px; border-radius: 3px;
+}
+QGroupBox {
+    border: 1px solid #2a2a30; border-radius: 5px;
+    margin-top: 12px; padding-top: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin; left: 10px; padding: 0 6px; color: #b0b0b6;
+}
+QProgressBar {
+    background: #26262b; border: 1px solid #3a3a44;
+    border-radius: 4px; text-align: center; color: #e8e8ea;
+}
+QProgressBar::chunk { background: #4ec9b0; border-radius: 3px; }
+QToolBar { background: #1a1a1f; border: none; spacing: 6px; padding: 4px; }
+QStatusBar { background: #1a1a1f; color: #b0b0b6; }
+QLabel { color: #d6d6dc; }
+"""
+
+
+def apply_dark_palette(app):
+    app.setStyle("Fusion")
+    pal = QPalette()
+    pal.setColor(QPalette.ColorRole.Window, QColor("#1e1e22"))
+    pal.setColor(QPalette.ColorRole.WindowText, QColor("#e8e8ea"))
+    pal.setColor(QPalette.ColorRole.Base, QColor("#26262b"))
+    pal.setColor(QPalette.ColorRole.AlternateBase, QColor("#2a2a30"))
+    pal.setColor(QPalette.ColorRole.Text, QColor("#e8e8ea"))
+    pal.setColor(QPalette.ColorRole.Button, QColor("#2a2a30"))
+    pal.setColor(QPalette.ColorRole.ButtonText, QColor("#e8e8ea"))
+    pal.setColor(QPalette.ColorRole.Highlight, QColor("#4ec9b0"))
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#1a1a1f"))
+    pal.setColor(QPalette.ColorRole.ToolTipBase, QColor("#1a1a1f"))
+    pal.setColor(QPalette.ColorRole.ToolTipText, QColor("#e8e8ea"))
+    app.setPalette(pal)
+    app.setStyleSheet(DARK_STYLESHEET)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EMG-AI-Arm — control panel")
-        self.resize(1180, 760)
+        self.setWindowTitle("EMG-AI-Arm  -  control panel")
+        self.resize(1280, 820)
 
-        # ---- Tabs ----
         self.tab_signal = SignalTab()
         self.tab_trainer = TrainerTab()
         self.tab_inference = InferenceTab()
 
         tabs = QTabWidget()
-        tabs.addTab(self.tab_signal, "1 · Live signal")
-        tabs.addTab(self.tab_trainer, "2 · Trainer")
-        tabs.addTab(self.tab_inference, "3 · Inference + arm")
+        tabs.addTab(self.tab_signal, "1  Live signal")
+        tabs.addTab(self.tab_trainer, "2  Trainer")
+        tabs.addTab(self.tab_inference, "3  Inference + arm")
         self.setCentralWidget(tabs)
 
-        # ---- Top bar: source selector + start/stop ----
         toolbar = QToolBar("Source")
         toolbar.setMovable(False)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
 
-        toolbar.addWidget(QLabel("  Source: "))
+        toolbar.addWidget(QLabel("   Source: "))
         self.combo_source = QComboBox()
         self.combo_source.addItems(["fake (emulator)", "serial (Arduino)"])
         toolbar.addWidget(self.combo_source)
@@ -81,18 +108,12 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.status.showMessage("Pick a source and press Start.")
 
-        # ---- Worker (created on Start) ----
-        self.worker: StreamWorker | None = None
+        self.worker = None
 
-        # ---- Signals ----
         self.btn_start.clicked.connect(self._start_stream)
         self.btn_stop.clicked.connect(self._stop_stream)
 
-    # ------------------------------------------------------------------- #
-    # Stream lifecycle
-    # ------------------------------------------------------------------- #
-
-    def _start_stream(self) -> None:
+    def _start_stream(self):
         src = "fake" if self.combo_source.currentIndex() == 0 else "serial"
         port = None
         if src == "serial":
@@ -105,19 +126,19 @@ class MainWindow(QMainWindow):
                 return
 
         self.worker = StreamWorker(source=src, port=port)
+        self.worker.samples_ready.connect(self.tab_signal.on_samples)
         self.worker.window_ready.connect(self.tab_signal.on_window)
         self.worker.window_ready.connect(self.tab_trainer.on_window)
         self.worker.window_ready.connect(self.tab_inference.on_window)
         self.worker.error.connect(self._on_worker_error)
-
         self.worker.start()
 
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.combo_source.setEnabled(False)
-        self.status.showMessage(f"Streaming from {src}…")
+        self.status.showMessage("Streaming from " + src + " ...")
 
-    def _stop_stream(self) -> None:
+    def _stop_stream(self):
         if self.worker:
             self.worker.stop()
             self.worker.wait(2000)
@@ -127,7 +148,7 @@ class MainWindow(QMainWindow):
         self.combo_source.setEnabled(True)
         self.status.showMessage("Stopped.")
 
-    def _on_worker_error(self, msg: str) -> None:
+    def _on_worker_error(self, msg):
         self._stop_stream()
         QMessageBox.critical(self, "Stream error", msg)
 
@@ -138,7 +159,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    apply_dark_palette(app)
     w = MainWindow()
     w.show()
     sys.exit(app.exec())
