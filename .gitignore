@@ -64,3 +64,13 @@ paper/*.fdb_latexmk
 # Secrets
 .env
 *.secret
+
+# Personal working files
+HANDOFF.md
+SKILL_REFRESHER.md
+tree.txt
+Total.zip
+Muhtasim_Al_Ahsan_Academic_CV.docx
+
+# Camera models (we'll distribute separately if needed)
+emg_ai_arm/camera_models/
