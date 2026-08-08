@@ -31,7 +31,13 @@ from emg_ai_arm.control.state_machine import Controller
 from emg_ai_arm.features.extract_features import extract_features
 from emg_ai_arm.utils.config import MODELS_DIR
 from emg_ai_arm.visualization.arm_widget import ArmWidget
+import cv2
 
+from PyQt6.QtGui import (
+    QFont,
+    QImage,
+    QPixmap,
+)
 
 CLASS_NAMES = {0: "REST", 1: "CH1", 2: "CH2", 3: "BOTH"}
 
@@ -40,8 +46,27 @@ class InferenceTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # ---- Left: arm visualisation ----
+        from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+
         self.arm = ArmWidget()
+
+        self.camera_label = QLabel()
+
+        self.camera_label.setMinimumSize(480, 360)
+
+        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.camera_label.setText("Camera Preview")
+
+        left_layout = QVBoxLayout()
+
+        left_layout.addWidget(self.camera_label)
+
+        left_layout.addWidget(self.arm)
+
+        left_widget = QWidget()
+
+        left_widget.setLayout(left_layout)
 
         # ---- Right: predictions + controls ----
         right = QVBoxLayout()
@@ -84,7 +109,7 @@ class InferenceTab(QWidget):
 
         # ---- Overall layout ----
         h = QHBoxLayout(self)
-        h.addWidget(self.arm, 2)
+        h.addWidget(left_widget, 2)
         right_widget = QWidget()
         right_widget.setLayout(right)
         h.addWidget(right_widget, 1)
@@ -147,6 +172,53 @@ class InferenceTab(QWidget):
         self._history.clear()
         self.history.setText("")
 
+    def process_prediction(self, pred: int, strength: float) -> None:
+        cmd = self._ctrl.update(pred, strength)
+
+        # Boost the speed passed to the arm so motion is clearly visible
+        arm_speed = max(0.6, min(1.0, strength * 1.8))
+
+        self.pred_label.setText(
+            f"Prediction: {pred} ({CLASS_NAMES.get(pred, '?')})"
+        )
+        self.strength_label.setText(f"Strength: {strength:.2f}")
+        self.cmd_label.setText(f"Command: {cmd}")
+        self.mode_label.setText(
+            f"Mode: {self._ctrl.mode_names[self._ctrl.mode]}"
+        )
+
+        self.arm.set_mode(self._ctrl.mode_names[self._ctrl.mode])
+        self.arm.set_command(cmd)
+        self.arm.apply_command(cmd, speed=arm_speed)
+
+        self._history.append(cmd)
+        self._history = self._history[-12:]
+        self.history.setText("\n".join(reversed(self._history)))
+
+    def update_camera_frame(self, frame):
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        h, w, ch = rgb.shape
+
+        img = QImage(
+            rgb.data,
+            w,
+            h,
+            ch * w,
+            QImage.Format.Format_RGB888
+        )
+
+        pix = QPixmap.fromImage(img)
+
+        self.camera_label.setPixmap(
+            pix.scaled(
+                self.camera_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+        )
+
     # ------------------------------------------------------------------- #
     # Slot — stream worker calls this for every new window
     # ------------------------------------------------------------------- #
@@ -161,23 +233,6 @@ class InferenceTab(QWidget):
             return
         strength = float(max(window[:, 0].mean(), window[:, 1].mean()))
 
-        cmd = self._ctrl.update(pred, strength)
+        self.process_prediction(pred, strength)
 
-        # Boost the speed passed to the arm so motion is clearly visible
-        # under the emulator. Real EMG strength values tend to be larger,
-        # so this multiplier can be reduced later when real data arrives.
-        arm_speed = max(0.6, min(1.0, strength * 1.8))
 
-        self.pred_label.setText(f"Prediction: {pred} ({CLASS_NAMES.get(pred, '?')})")
-        self.strength_label.setText(f"Strength: {strength:.2f}")
-        self.cmd_label.setText(f"Command: {cmd}")
-        self.mode_label.setText(f"Mode: {self._ctrl.mode_names[self._ctrl.mode]}")
-
-        self.arm.set_mode(self._ctrl.mode_names[self._ctrl.mode])
-        self.arm.set_command(cmd)
-        self.arm.apply_command(cmd, speed=arm_speed)
-
-        # Maintain a small rolling command log
-        self._history.append(cmd)
-        self._history = self._history[-12:]
-        self.history.setText("\n".join(reversed(self._history)))
