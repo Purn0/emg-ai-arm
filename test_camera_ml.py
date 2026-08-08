@@ -1,5 +1,6 @@
 import cv2
 
+from emg_ai_arm.camera.gesture_mapper import gesture_to_prediction
 from emg_ai_arm.camera.ml_gesture_recognizer import MLGestureRecognizer
 
 recognizer = MLGestureRecognizer()
@@ -18,10 +19,16 @@ while True:
     recognizer.draw_landmarks(frame, raw)
 
     for result in results:
+        pred = gesture_to_prediction(result.gesture_name)
+
+        print(
+            f"Gesture: {result.gesture_name:<15} "
+            f"Prediction: {pred}"
+        )
 
         cv2.putText(
             frame,
-            f"{result.gesture_name} ({result.score:.2f})",
+            f"{result.gesture_name} -> {pred}",
             (20, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             1,

@@ -15,7 +15,7 @@ from emg_ai_arm.visualization.inference_tab import InferenceTab
 from emg_ai_arm.visualization.signal_tab import SignalTab
 from emg_ai_arm.visualization.stream_worker import StreamWorker
 from emg_ai_arm.visualization.trainer_tab import TrainerTab
-
+from emg_ai_arm.camera.camera_worker import CameraWorker
 
 DARK_STYLESHEET = """
 QTabWidget::pane { border: 1px solid #2a2a30; top: -1px; }
@@ -95,7 +95,11 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(QLabel("   Source: "))
         self.combo_source = QComboBox()
-        self.combo_source.addItems(["fake (emulator)", "serial (Arduino)"])
+        self.combo_source.addItems([
+            "fake (emulator)",
+            "serial (Arduino)",
+            "camera (vision)"
+        ])
         toolbar.addWidget(self.combo_source)
 
         self.btn_start = QPushButton("Start stream")
@@ -114,7 +118,16 @@ class MainWindow(QMainWindow):
         self.btn_stop.clicked.connect(self._stop_stream)
 
     def _start_stream(self):
-        src = "fake" if self.combo_source.currentIndex() == 0 else "serial"
+        index = self.combo_source.currentIndex()
+
+        if index == 0:
+            src = "fake"
+
+        elif index == 1:
+            src = "serial"
+
+        else:
+            src = "camera"
         port = None
         if src == "serial":
             port, ok = QInputDialog.getText(
@@ -125,12 +138,41 @@ class MainWindow(QMainWindow):
             if not ok or not port:
                 return
 
-        self.worker = StreamWorker(source=src, port=port)
-        self.worker.samples_ready.connect(self.tab_signal.on_samples)
-        self.worker.window_ready.connect(self.tab_signal.on_window)
-        self.worker.window_ready.connect(self.tab_trainer.on_window)
-        self.worker.window_ready.connect(self.tab_inference.on_window)
-        self.worker.error.connect(self._on_worker_error)
+        if src == "camera":
+            self.worker = CameraWorker()
+        else:
+            self.worker = StreamWorker(source=src, port=port)
+        if src == "camera":
+
+            self.worker.prediction_ready.connect(
+                self.tab_inference.process_prediction
+            )
+            self.worker.frame_ready.connect(
+                self.tab_inference.update_camera_frame
+            )
+            self.worker.error.connect(self._on_worker_error)
+
+        else:
+
+            self.worker.samples_ready.connect(
+                self.tab_signal.on_samples
+            )
+
+            self.worker.window_ready.connect(
+                self.tab_signal.on_window
+            )
+
+            self.worker.window_ready.connect(
+                self.tab_trainer.on_window
+            )
+
+            self.worker.window_ready.connect(
+                self.tab_inference.on_window
+            )
+
+            self.worker.error.connect(
+                self._on_worker_error
+            )
         self.worker.start()
 
         self.btn_start.setEnabled(False)
