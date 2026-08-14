@@ -2,13 +2,16 @@ from enum import Enum
 
 
 class RobotCommand(Enum):
-    NONE = 0
+    STOP = 0
 
-    HAND_OPEN = 1
-    HAND_CLOSE = 2
+    ARM_UP = 1
+    ARM_DOWN = 2
 
-    THUMB_UP = 3
-    VICTORY = 4
-    POINT = 5
+    GRIP_OPEN = 3
+    GRIP_CLOSE = 4
 
-    UNKNOWN = 99
+    WRIST_CW = 5
+    WRIST_CCW = 6
+
+    BASE_LEFT = 7
+    BASE_RIGHT = 8

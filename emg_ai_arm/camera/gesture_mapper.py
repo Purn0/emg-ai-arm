@@ -1,24 +1,27 @@
-"""
-Maps camera gesture names to the same prediction IDs used by
-the EMG Random Forest model.
+from emg_ai_arm.control.robot_command import RobotCommand
 
-EMG predictions:
-0 = REST
-1 = CH1
-2 = CH2
-3 = BOTH
-"""
 
-GESTURE_TO_PREDICTION = {
-    "Closed_Fist": 1,
-    "Open_Palm": 2,
-    "Thumb_Up": 3,
+GESTURE_TO_COMMAND = {
+    # Arm vertical movement
+    "Thumb_Up": RobotCommand.ARM_UP,
+    "Thumb_Down": RobotCommand.ARM_DOWN,
 
-    # Unknown gestures become REST
-    "Unknown": 0,
-    None: 0,
+    # Gripper
+    "Open_Palm": RobotCommand.GRIP_OPEN,
+    "Closed_Fist": RobotCommand.GRIP_CLOSE,
+
+    # Wrist rotation
+    "Rock": RobotCommand.WRIST_CW,
+    "Call_Me": RobotCommand.WRIST_CCW,
+
+    # Base rotation
+    "Victory": RobotCommand.BASE_LEFT,
+    "Pointing_Up": RobotCommand.BASE_RIGHT,
 }
 
 
-def gesture_to_prediction(name: str) -> int:
-    return GESTURE_TO_PREDICTION.get(name, 0)
+def gesture_to_command(gesture: str):
+    return GESTURE_TO_COMMAND.get(
+        gesture,
+        RobotCommand.STOP,
+    )
