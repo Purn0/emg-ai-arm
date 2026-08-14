@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
         if src == "camera":
 
             self.worker.prediction_ready.connect(
-                self.tab_inference.process_prediction
+                self.tab_inference.process_gesture
             )
             self.worker.frame_ready.connect(
                 self.tab_inference.update_camera_frame

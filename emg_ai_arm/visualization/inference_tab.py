@@ -1,22 +1,22 @@
 """
-Tab 3 — real-time inference dashboard.
+Tab 3 — real-time camera gesture inference dashboard.
 
-Loads a trained Random Forest from disk and runs it on every window
-emitted by the shared stream worker. The classifier's prediction is
-fed into the state-machine controller, and the resulting command drives
-the 2-D virtual arm widget.
+The camera worker performs:
+    camera -> MediaPipe -> gesture_model.pkl -> gesture name
 
-Lets you preview the entire control pipeline without any hardware
-hooked up.
+This tab receives:
+    gesture + confidence + camera frame
+
+and sends:
+    gesture -> RobotCommand -> virtual arm
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import cv2
 
-import numpy as np
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -27,177 +27,343 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from emg_ai_arm.control.state_machine import Controller
-from emg_ai_arm.features.extract_features import extract_features
-from emg_ai_arm.utils.config import MODELS_DIR
+from emg_ai_arm.control.gesture_mapper import gesture_to_command
+from emg_ai_arm.control.robot_command import RobotCommand
 from emg_ai_arm.visualization.arm_widget import ArmWidget
-import cv2
-
-from PyQt6.QtGui import (
-    QFont,
-    QImage,
-    QPixmap,
-)
-
-CLASS_NAMES = {0: "REST", 1: "CH1", 2: "CH2", 3: "BOTH"}
 
 
 class InferenceTab(QWidget):
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+        # ---------------------------------------------------------
+        # Left side: camera + virtual arm
+        # ---------------------------------------------------------
 
         self.arm = ArmWidget()
 
         self.camera_label = QLabel()
-
         self.camera_label.setMinimumSize(480, 360)
-
-        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
+        self.camera_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
         self.camera_label.setText("Camera Preview")
 
         left_layout = QVBoxLayout()
-
         left_layout.addWidget(self.camera_label)
-
         left_layout.addWidget(self.arm)
 
         left_widget = QWidget()
-
         left_widget.setLayout(left_layout)
 
-        # ---- Right: predictions + controls ----
+        # ---------------------------------------------------------
+        # Right side: prediction + controls
+        # ---------------------------------------------------------
+
         right = QVBoxLayout()
 
-        load_box = QGroupBox("Model")
-        lb = QHBoxLayout(load_box)
-        self.model_label = QLabel("No model loaded")
-        self.btn_load = QPushButton("Load model (.joblib)")
-        self.btn_default = QPushButton("Load default (rf_model.joblib)")
-        self.btn_reset = QPushButton("Reset arm pose")
-        lb.addWidget(self.model_label, 1)
-        lb.addWidget(self.btn_default)
-        lb.addWidget(self.btn_load)
-        right.addWidget(load_box)
+        # Model information
+        model_box = QGroupBox("Camera Model")
+        model_layout = QHBoxLayout(model_box)
 
+        self.model_label = QLabel(
+            "Using camera gesture model"
+        )
+
+        self.btn_load = QPushButton(
+            "Load gesture model"
+        )
+
+        self.btn_reset = QPushButton(
+            "Reset arm pose"
+        )
+
+        model_layout.addWidget(
+            self.model_label,
+            1
+        )
+        model_layout.addWidget(
+            self.btn_load
+        )
+
+        right.addWidget(model_box)
+
+        # Live prediction
         pred_box = QGroupBox("Live prediction")
-        pb = QVBoxLayout(pred_box)
-        self.pred_label = QLabel("Prediction: —")
-        self.pred_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        self.strength_label = QLabel("Strength: 0.00")
-        self.cmd_label = QLabel("Command: REST")
-        self.cmd_label.setFont(QFont("Consolas", 12))
-        self.mode_label = QLabel("Mode: GRIP")
-        self.mode_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        for w in (self.pred_label, self.mode_label, self.strength_label, self.cmd_label):
-            pb.addWidget(w)
+        pred_layout = QVBoxLayout(pred_box)
+
+        self.pred_label = QLabel(
+            "Prediction: —"
+        )
+        self.pred_label.setFont(
+            QFont(
+                "Segoe UI",
+                18,
+                QFont.Weight.Bold
+            )
+        )
+
+        self.strength_label = QLabel(
+            "Confidence: 0.00"
+        )
+
+        self.cmd_label = QLabel(
+            "Command: STOP"
+        )
+        self.cmd_label.setFont(
+            QFont(
+                "Consolas",
+                12
+            )
+        )
+
+        self.mode_label = QLabel(
+            "Mode: CAMERA"
+        )
+        self.mode_label.setFont(
+            QFont(
+                "Segoe UI",
+                14,
+                QFont.Weight.Bold
+            )
+        )
+
+        pred_layout.addWidget(
+            self.pred_label
+        )
+        pred_layout.addWidget(
+            self.mode_label
+        )
+        pred_layout.addWidget(
+            self.strength_label
+        )
+        pred_layout.addWidget(
+            self.cmd_label
+        )
+
         right.addWidget(pred_box)
 
-        hist_box = QGroupBox("Recent commands")
-        hb = QVBoxLayout(hist_box)
+        # Command history
+        hist_box = QGroupBox(
+            "Recent commands"
+        )
+
+        hist_layout = QVBoxLayout(
+            hist_box
+        )
+
         self.history = QLabel("")
-        self.history.setFont(QFont("Consolas", 9))
-        self.history.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.history.setMinimumHeight(140)
-        hb.addWidget(self.history)
+        self.history.setFont(
+            QFont(
+                "Consolas",
+                9
+            )
+        )
+
+        self.history.setAlignment(
+            Qt.AlignmentFlag.AlignTop
+        )
+
+        self.history.setMinimumHeight(
+            140
+        )
+
+        hist_layout.addWidget(
+            self.history
+        )
+
         right.addWidget(hist_box)
 
-        right.addWidget(self.btn_reset)
+        right.addWidget(
+            self.btn_reset
+        )
+
         right.addStretch(1)
 
-        # ---- Overall layout ----
-        h = QHBoxLayout(self)
-        h.addWidget(left_widget, 2)
+        # ---------------------------------------------------------
+        # Overall layout
+        # ---------------------------------------------------------
+
+        layout = QHBoxLayout(self)
+
+        layout.addWidget(
+            left_widget,
+            2
+        )
+
         right_widget = QWidget()
         right_widget.setLayout(right)
-        h.addWidget(right_widget, 1)
 
-        # ---- State ----
-        self._clf = None
-        self._ctrl = Controller()
+        layout.addWidget(
+            right_widget,
+            1
+        )
+
+        # ---------------------------------------------------------
+        # State
+        # ---------------------------------------------------------
+
         self._history: list[str] = []
 
-        # ---- Signals ----
-        self.btn_load.clicked.connect(self._load_dialog)
-        self.btn_default.clicked.connect(self._load_default)
-        self.btn_reset.clicked.connect(self._reset)
+        # ---------------------------------------------------------
+        # Signals
+        # ---------------------------------------------------------
 
-        # Try to auto-load
-        self._load_default()
+        self.btn_load.clicked.connect(
+            self._load_model_dialog
+        )
 
-    # ------------------------------------------------------------------- #
-    # Model loading
-    # ------------------------------------------------------------------- #
+        self.btn_reset.clicked.connect(
+            self._reset
+        )
 
-    def _load_default(self) -> None:
-        path = MODELS_DIR / "rf_model.joblib"
-        if path.exists():
-            self._load_path(path)
-        else:
-            self.model_label.setText(
-                "No default model found. Train one with "
-                "`python -m emg_ai_arm.models.train_ml`."
-            )
+    # ------------------------------------------------------------------
+    # Model
+    # ------------------------------------------------------------------
 
-    def _load_dialog(self) -> None:
+    def _load_model_dialog(self):
+        """
+        Optional manual model selection.
+
+        The CameraWorker normally owns the actual gesture model,
+        so this is mainly informational for now.
+        """
+
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Choose a model",
-            str(MODELS_DIR),
-            "Joblib model (*.joblib);;All files (*.*)",
+            "Choose gesture model",
+            "",
+            "Pickle model (*.pkl);;All files (*.*)",
         )
+
         if path:
-            self._load_path(Path(path))
+            self.model_label.setText(
+                f"Selected: {path}"
+            )
 
-    def _load_path(self, path: Path) -> None:
-        try:
-            import joblib
-            self._clf = joblib.load(str(path))
-            self.model_label.setText(f"Loaded: {path.name}")
-        except Exception as e:
-            self._clf = None
-            self.model_label.setText(f"Load failed: {e}")
-
-    # ------------------------------------------------------------------- #
+    # ------------------------------------------------------------------
     # Reset
-    # ------------------------------------------------------------------- #
+    # ------------------------------------------------------------------
 
-    def _reset(self) -> None:
-        self._ctrl = Controller()
+    def _reset(self):
+
         self.arm.reset_pose()
-        self.mode_label.setText("Mode: GRIP")
-        self.cmd_label.setText("Command: REST")
-        self._history.clear()
-        self.history.setText("")
-
-    def process_prediction(self, pred: int, strength: float) -> None:
-        cmd = self._ctrl.update(pred, strength)
-
-        # Boost the speed passed to the arm so motion is clearly visible
-        arm_speed = max(0.6, min(1.0, strength * 1.8))
 
         self.pred_label.setText(
-            f"Prediction: {pred} ({CLASS_NAMES.get(pred, '?')})"
+            "Prediction: —"
         )
-        self.strength_label.setText(f"Strength: {strength:.2f}")
-        self.cmd_label.setText(f"Command: {cmd}")
+
+        self.strength_label.setText(
+            "Confidence: 0.00"
+        )
+
+        self.cmd_label.setText(
+            "Command: STOP"
+        )
+
         self.mode_label.setText(
-            f"Mode: {self._ctrl.mode_names[self._ctrl.mode]}"
+            "Mode: CAMERA"
         )
 
-        self.arm.set_mode(self._ctrl.mode_names[self._ctrl.mode])
-        self.arm.set_command(cmd)
-        self.arm.apply_command(cmd, speed=arm_speed)
+        self._history.clear()
 
-        self._history.append(cmd)
+        self.history.setText("")
+
+    # ------------------------------------------------------------------
+    # Camera gesture
+    # ------------------------------------------------------------------
+
+    def process_gesture(
+        self,
+        gesture: str,
+        strength: float
+    ):
+
+        # Convert gesture name into RobotCommand.
+        cmd = gesture_to_command(
+            gesture
+        )
+
+        # ------------------------------------------------------
+        # UI
+        # ------------------------------------------------------
+
+        self.pred_label.setText(
+            f"Prediction: {gesture}"
+        )
+
+        self.strength_label.setText(
+            f"Confidence: {strength:.2f}"
+        )
+
+        self.cmd_label.setText(
+            f"Command: {cmd.name}"
+        )
+
+        self.mode_label.setText(
+            "Mode: CAMERA"
+        )
+
+        # ------------------------------------------------------
+        # Virtual arm
+        # ------------------------------------------------------
+
+        self.arm.set_mode(
+            "CAMERA"
+        )
+
+        self.arm.set_command(
+            cmd.name
+        )
+
+        # Confidence controls movement speed.
+        arm_speed = max(
+            0.6,
+            min(
+                1.0,
+                strength * 1.8
+            )
+        )
+
+        if cmd != RobotCommand.STOP:
+
+            self.arm.apply_command(
+                cmd,
+                speed=arm_speed
+            )
+
+        # ------------------------------------------------------
+        # History
+        # ------------------------------------------------------
+
+        self._history.append(
+            cmd.name
+        )
+
         self._history = self._history[-12:]
-        self.history.setText("\n".join(reversed(self._history)))
 
-    def update_camera_frame(self, frame):
+        self.history.setText(
+            "\n".join(
+                reversed(
+                    self._history
+                )
+            )
+        )
 
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # ------------------------------------------------------------------
+    # Camera frame
+    # ------------------------------------------------------------------
+
+    def update_camera_frame(
+        self,
+        frame
+    ):
+
+        rgb = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2RGB
+        )
 
         h, w, ch = rgb.shape
 
@@ -209,7 +375,9 @@ class InferenceTab(QWidget):
             QImage.Format.Format_RGB888
         )
 
-        pix = QPixmap.fromImage(img)
+        pix = QPixmap.fromImage(
+            img
+        )
 
         self.camera_label.setPixmap(
             pix.scaled(
@@ -218,21 +386,3 @@ class InferenceTab(QWidget):
                 Qt.TransformationMode.SmoothTransformation
             )
         )
-
-    # ------------------------------------------------------------------- #
-    # Slot — stream worker calls this for every new window
-    # ------------------------------------------------------------------- #
-
-    def on_window(self, window: np.ndarray, _true: int) -> None:
-        if self._clf is None:
-            return
-        feats = extract_features(window).reshape(1, -1)
-        try:
-            pred = int(self._clf.predict(feats)[0])
-        except Exception:
-            return
-        strength = float(max(window[:, 0].mean(), window[:, 1].mean()))
-
-        self.process_prediction(pred, strength)
-
-

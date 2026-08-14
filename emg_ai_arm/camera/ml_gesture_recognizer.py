@@ -90,7 +90,12 @@ class MLGestureRecognizer:
                 # Wrap features in a DataFrame with the same column names
                 # used at training time. This silences sklearn's
                 # "X does not have valid feature names" warning.
-                features_df = pd.DataFrame([features], columns=_FEATURE_COLUMNS)
+                feature_names = self.model.feature_names_in_
+
+                features_df = pd.DataFrame(
+                    [features],
+                    columns=feature_names
+                )
 
                 predicted_label = self.model.predict(features_df)[0]
                 score = 1.0

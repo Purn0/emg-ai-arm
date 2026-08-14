@@ -47,14 +47,13 @@ DEFAULTS = {
 }
 
 LIMITS = {
-    "base":     (0.0, 180.0),
-    "shoulder": (15.0, 165.0),
-    "elbow":    (0.0, 175.0),
-    "wrist_p":  (10.0, 170.0),
-    "wrist_r":  (0.0, 180.0),
+    "base":     (25.0, 155.0),
+    "shoulder": (55.0, 145.0),
+    "elbow":    (35.0, 145.0),
+    "wrist_p":  (45.0, 135.0),
+    "wrist_r":  (20.0, 160.0),
     "claw":     (0.0, 60.0),
 }
-
 LABELS = {
     "base":     "Base yaw",
     "shoulder": "Shoulder",
@@ -126,17 +125,59 @@ def _fk(angles):
             p[2],
         ])
 
+    # ---------------------------------------------------------
+    # Wrist roll
+    # ---------------------------------------------------------
+
+    roll = math.radians(
+        angles["wrist_r"] - 90.0
+    )
+
+    # Local sideways direction before wrist roll.
+    local_side = np.array([
+        0.0,
+        1.0,
+        0.0
+    ])
+
+    # Rotate local_side around the wrist direction.
+    axis = wrist_dir / max(
+        np.linalg.norm(wrist_dir),
+        1e-9
+    )
+
+    cos_r = math.cos(roll)
+    sin_r = math.sin(roll)
+
+    # Rodrigues' rotation formula.
+    rolled_side = (
+            local_side * cos_r
+            + np.cross(axis, local_side) * sin_r
+            + axis
+            * np.dot(axis, local_side)
+            * (1.0 - cos_r)
+    )
+
+    rolled_side = rolled_side / max(
+        np.linalg.norm(rolled_side),
+        1e-9
+    )
+
     return {
-        "base":      rot(base),
-        "shoulder":  rot(shoulder),
-        "elbow":     rot(elbow),
-        "wrist":     rot(wrist),
+        "base": rot(base),
+        "shoulder": rot(shoulder),
+        "elbow": rot(elbow),
+        "wrist": rot(wrist),
         "claw_root": rot(claw_root),
         "upper_dir": rot(upper_dir),
-        "fore_dir":  rot(fore_dir),
+        "fore_dir": rot(fore_dir),
         "wrist_dir": rot(wrist_dir),
-        "yaw":       yaw,
-        "wp_abs":    wp_abs,
+
+        # NEW
+        "gripper_side": rot(rolled_side),
+
+        "yaw": yaw,
+        "wp_abs": wp_abs,
     }
 
 
@@ -173,7 +214,7 @@ class ArmWidget(QWidget):
         self._current = dict(DEFAULTS)
         self._target = dict(DEFAULTS)
 
-        self._easing = 0.30
+        self._easing = 0.18
         self._mode_text = "GRIP"
         self._cmd_text = "REST"
 
@@ -188,27 +229,97 @@ class ArmWidget(QWidget):
         self._cmd_text = cmd
 
     def apply_command(self, cmd, speed=0.5):
-        step = 14.0 * max(0.2, min(1.0, speed))
-        c = cmd.upper().split(" SPEED=")[0]
+        step = 4.0 * max(0.25, min(1.0, speed))
 
+        # Accept RobotCommand enum
+        # as well as the old string command format.
+        if hasattr(cmd, "name"):
+            c = cmd.name.upper()
+        else:
+            c = str(cmd).upper().split(" SPEED=")[0]
+
+        # ---------------------------------------------------------
+        # Gripper — continuous movement
+        # ---------------------------------------------------------
         if c.startswith("GRIP_CLOSE"):
-            self._target["claw"] = _clip("claw", self._target["claw"] + step)
+            self._target["claw"] = _clip(
+                "claw",
+                self._target["claw"] + step
+            )
+
         elif c.startswith("GRIP_OPEN"):
-            self._target["claw"] = _clip("claw", self._target["claw"] - step)
-        elif c.startswith("WRIST_LEFT"):
-            self._target["wrist_r"] = _clip("wrist_r", self._target["wrist_r"] - step)
-            self._target["base"] = _clip("base", self._target["base"] - step * 0.5)
-        elif c.startswith("WRIST_RIGHT"):
-            self._target["wrist_r"] = _clip("wrist_r", self._target["wrist_r"] + step)
-            self._target["base"] = _clip("base", self._target["base"] + step * 0.5)
+            self._target["claw"] = _clip(
+                "claw",
+                self._target["claw"] - step
+            )
+
+        # ---------------------------------------------------------
+        # Wrist roll — continuous movement
+        # ---------------------------------------------------------
+        elif c.startswith("WRIST_CW"):
+            self._target["wrist_r"] = _clip(
+                "wrist_r",
+                self._target["wrist_r"] + step
+            )
+
+        elif c.startswith("WRIST_CCW"):
+            self._target["wrist_r"] = _clip(
+                "wrist_r",
+                self._target["wrist_r"] - step
+            )
+
+        # ---------------------------------------------------------
+        # Base yaw — continuous movement
+        # ---------------------------------------------------------
+        elif c.startswith("BASE_LEFT"):
+            self._target["base"] = _clip(
+                "base",
+                self._target["base"] - step
+            )
+
+        elif c.startswith("BASE_RIGHT"):
+            self._target["base"] = _clip(
+                "base",
+                self._target["base"] + step
+            )
+
+        # ---------------------------------------------------------
+        # Arm up — weighted 3-servo movement
+        # ---------------------------------------------------------
         elif c.startswith("ARM_UP"):
-            self._target["shoulder"] = _clip("shoulder", self._target["shoulder"] + step * 0.7)
-            self._target["elbow"] = _clip("elbow", self._target["elbow"] + step * 0.6)
-            self._target["wrist_p"] = _clip("wrist_p", self._target["wrist_p"] + step * 0.4)
+            self._target["shoulder"] = _clip(
+                "shoulder",
+                self._target["shoulder"] + step * 0.70
+            )
+
+            self._target["elbow"] = _clip(
+                "elbow",
+                self._target["elbow"] + step * 0.60
+            )
+
+            self._target["wrist_p"] = _clip(
+                "wrist_p",
+                self._target["wrist_p"] + step * 0.40
+            )
+
+        # ---------------------------------------------------------
+        # Arm down — weighted 3-servo movement
+        # ---------------------------------------------------------
         elif c.startswith("ARM_DOWN"):
-            self._target["shoulder"] = _clip("shoulder", self._target["shoulder"] - step * 0.7)
-            self._target["elbow"] = _clip("elbow", self._target["elbow"] - step * 0.6)
-            self._target["wrist_p"] = _clip("wrist_p", self._target["wrist_p"] - step * 0.4)
+            self._target["shoulder"] = _clip(
+                "shoulder",
+                self._target["shoulder"] - step * 0.70
+            )
+
+            self._target["elbow"] = _clip(
+                "elbow",
+                self._target["elbow"] - step * 0.60
+            )
+
+            self._target["wrist_p"] = _clip(
+                "wrist_p",
+                self._target["wrist_p"] - step * 0.40
+            )
 
     def reset_pose(self):
         self._target = dict(DEFAULTS)
@@ -391,6 +502,163 @@ class ArmWidget(QWidget):
         p.setPen(QPen(_shade(color, 1.4), 1.0))
         p.drawLine(mid_start, mid_end)
 
+    def _draw_plate_link(self, p, start_3d, end_3d,
+                         width, thickness, cx, cy, scale):
+        """
+        Draw a flat mechanical arm plate between two 3D joint positions.
+        Designed to resemble the black aluminum plates used on the physical arm.
+        """
+        direction = end_3d - start_3d
+        length = np.linalg.norm(direction)
+
+        if length < 1e-6:
+            return
+
+        direction = direction / length
+
+        # Horizontal sideways vector.
+        side = np.array([
+            -direction[1],
+            direction[0],
+            0.0
+        ])
+
+        side_len = np.linalg.norm(side)
+
+        if side_len < 1e-6:
+            side = np.array([0.0, 1.0, 0.0])
+        else:
+            side /= side_len
+
+        side *= width / 2.0
+
+        # Slight vertical thickness.
+        thickness_vec = np.array([0.0, 0.0, thickness / 2.0])
+
+        corners = [
+            start_3d + side + thickness_vec,
+            start_3d - side + thickness_vec,
+            end_3d - side + thickness_vec,
+            end_3d + side + thickness_vec,
+        ]
+
+        bottom = [
+            start_3d + side - thickness_vec,
+            start_3d - side - thickness_vec,
+            end_3d - side - thickness_vec,
+            end_3d + side - thickness_vec,
+        ]
+
+        top_poly = QPolygonF([
+            _iso(c, cx, cy, scale) for c in corners
+        ])
+
+        bottom_poly = QPolygonF([
+            _iso(c, cx, cy, scale) for c in bottom
+        ])
+
+        black = QColor("#202124")
+        dark = QColor("#111214")
+        edge = QColor("#08090a")
+
+        # Main top surface
+        p.setBrush(QBrush(black))
+        p.setPen(QPen(edge, 1.2))
+        p.drawPolygon(top_poly)
+
+        # Bottom / thickness surface
+        p.setBrush(QBrush(dark))
+        p.setPen(QPen(edge, 1.0))
+        p.drawPolygon(bottom_poly)
+
+        # Center highlight
+        s = _iso(start_3d, cx, cy, scale)
+        e = _iso(end_3d, cx, cy, scale)
+
+        p.setPen(QPen(QColor("#3a3b3e"), 1.0))
+        p.drawLine(s, e)
+
+    def _draw_servo_box(self, p, center_3d,
+                        width, height, depth,
+                        cx, cy, scale,
+                        axle_radius=8):
+        """
+        Draw a compact black rectangular hobby-servo housing.
+        """
+
+        # The box is centered around the joint.
+        x = width / 2.0
+        y = depth / 2.0
+        z = height / 2.0
+
+        pts = [
+            np.array([-x, -y, -z]),
+            np.array([x, -y, -z]),
+            np.array([x, y, -z]),
+            np.array([-x, y, -z]),
+
+            np.array([-x, -y, z]),
+            np.array([x, -y, z]),
+            np.array([x, y, z]),
+            np.array([-x, y, z]),
+        ]
+
+        pts = [center_3d + v for v in pts]
+
+        top = QPolygonF([
+            _iso(pts[i], cx, cy, scale)
+            for i in (4, 5, 6, 7)
+        ])
+
+        front = QPolygonF([
+            _iso(pts[i], cx, cy, scale)
+            for i in (0, 1, 5, 4)
+        ])
+
+        side = QPolygonF([
+            _iso(pts[i], cx, cy, scale)
+            for i in (1, 2, 6, 5)
+        ])
+
+        # Draw darker faces first.
+        p.setBrush(QBrush(QColor("#151619")))
+        p.setPen(QPen(QColor("#08090a"), 1.0))
+        p.drawPolygon(front)
+
+        p.setBrush(QBrush(QColor("#1c1d20")))
+        p.drawPolygon(side)
+
+        p.setBrush(QBrush(QColor("#292a2e")))
+        p.drawPolygon(top)
+
+        # Axle
+        c = _iso(center_3d, cx, cy, scale)
+
+        p.setBrush(QBrush(QColor("#55565a")))
+        p.setPen(QPen(QColor("#08090a"), 1.2))
+        p.drawEllipse(c, axle_radius, axle_radius)
+
+        p.setBrush(QBrush(QColor("#111214")))
+        p.drawEllipse(c, axle_radius * 0.35, axle_radius * 0.35)
+
+        # Servo mounting screws
+        screw_offset = min(width, depth) * 0.30
+
+        for sx, sy in (
+                (-screw_offset, -screw_offset),
+                (screw_offset, -screw_offset),
+                (-screw_offset, screw_offset),
+                (screw_offset, screw_offset),
+        ):
+            screw = _iso(
+                center_3d + np.array([sx, sy, z + 0.01]),
+                cx, cy, scale
+            )
+
+            p.setBrush(QBrush(QColor("#66676b")))
+            p.setPen(QPen(QColor("#0a0a0b"), 0.8))
+            p.drawEllipse(screw, 2.0, 2.0)
+
     def _servo_housing(self, p, pos_3d, color, radius_px, cx, cy, scale):
         c = _iso(pos_3d, cx, cy, scale)
         # outer ring
@@ -407,80 +675,329 @@ class ArmWidget(QWidget):
         p.drawEllipse(c, radius_px * 0.20, radius_px * 0.20)
 
     def _draw_arm(self, p, pts, cx, cy, scale):
-        yaw = pts["yaw"]
+        """
+        Mechanical rendering of the main six-DOF arm.
 
-        # Order: upper arm, then elbow housing, then forearm, then wrist housing
-        self._link_tube(p, pts["shoulder"], pts["elbow"],
-                        W_UPPER, COLORS["shoulder"], yaw, cx, cy, scale)
-        self._servo_housing(p, pts["elbow"], COLORS["elbow"], 10,
-                            cx, cy, scale)
+        Physical structure:
+            shoulder servo
+            -> upper arm plates
+            -> elbow servo
+            -> forearm plates
+            -> wrist pitch servo
+            -> wrist section
+            -> wrist roll
+        """
 
-        self._link_tube(p, pts["elbow"], pts["wrist"],
-                        W_FORE, COLORS["elbow"], yaw, cx, cy, scale)
-        self._servo_housing(p, pts["wrist"], COLORS["wrist_p"], 9,
-                            cx, cy, scale)
+        # ---------------------------------------------------------------
+        # Dimensions
+        # ---------------------------------------------------------------
 
-        # Wrist segment + roll housing
-        self._link_tube(p, pts["wrist"], pts["claw_root"],
-                        W_WRIST, COLORS["wrist_p"], yaw, cx, cy, scale)
+        upper_width = 0.32
+        upper_thickness = 0.075
 
-        # Wrist roll: visible rotating ring at the end of the wrist segment
-        roll = math.radians(self._current["wrist_r"] - 90.0)
-        wr_center = _iso(pts["claw_root"], cx, cy, scale)
-        p.setBrush(QBrush(_shade(COLORS["wrist_r"], 0.7)))
-        p.setPen(QPen(QColor("#0c0c10"), 1.5))
-        p.drawEllipse(wr_center, 12, 12)
-        p.setBrush(QBrush(QColor(COLORS["wrist_r"])))
-        p.setPen(QPen(_shade(COLORS["wrist_r"], 0.5), 1))
-        p.drawEllipse(wr_center, 8, 8)
-        tick = QPointF(
-            wr_center.x() + 10 * math.cos(roll),
-            wr_center.y() - 10 * math.sin(roll),
+        fore_width = 0.28
+        fore_thickness = 0.070
+
+        wrist_width = 0.20
+        wrist_thickness = 0.060
+
+        # ---------------------------------------------------------------
+        # Shoulder servo housing
+        # ---------------------------------------------------------------
+
+        self._draw_servo_box(
+            p,
+            pts["shoulder"],
+            width=0.42,
+            height=0.32,
+            depth=0.28,
+            cx=cx,
+            cy=cy,
+            scale=scale,
+            axle_radius=10,
         )
-        p.setPen(QPen(QColor("#1c1c20"), 2))
+
+        # Shoulder side brackets.
+        shoulder = pts["shoulder"]
+
+        bracket_offset = 0.20
+
+        for sign in (-1, 1):
+            offset = np.array([
+                0.0,
+                sign * bracket_offset,
+                0.0
+            ])
+
+            bracket_start = shoulder + offset
+            bracket_end = pts["elbow"] + offset
+
+            self._draw_plate_link(
+                p,
+                bracket_start,
+                bracket_end,
+                width=upper_width,
+                thickness=upper_thickness,
+                cx=cx,
+                cy=cy,
+                scale=scale,
+            )
+
+        # ---------------------------------------------------------------
+        # Elbow servo
+        # ---------------------------------------------------------------
+
+        self._draw_servo_box(
+            p,
+            pts["elbow"],
+            width=0.40,
+            height=0.30,
+            depth=0.26,
+            cx=cx,
+            cy=cy,
+            scale=scale,
+            axle_radius=9,
+        )
+
+        # ---------------------------------------------------------------
+        # Forearm plates
+        # ---------------------------------------------------------------
+
+        elbow = pts["elbow"]
+        wrist = pts["wrist"]
+
+        bracket_offset = 0.16
+
+        for sign in (-1, 1):
+            offset = np.array([
+                0.0,
+                sign * bracket_offset,
+                0.0
+            ])
+
+            self._draw_plate_link(
+                p,
+                elbow + offset,
+                wrist + offset,
+                width=fore_width,
+                thickness=fore_thickness,
+                cx=cx,
+                cy=cy,
+                scale=scale,
+            )
+
+        # ---------------------------------------------------------------
+        # Wrist pitch servo
+        # ---------------------------------------------------------------
+
+        self._draw_servo_box(
+            p,
+            pts["wrist"],
+            width=0.34,
+            height=0.25,
+            depth=0.23,
+            cx=cx,
+            cy=cy,
+            scale=scale,
+            axle_radius=8,
+        )
+
+        # ---------------------------------------------------------------
+        # Wrist extension
+        # ---------------------------------------------------------------
+
+        wrist_dir = pts["wrist_dir"]
+
+        wrist_end = pts["claw_root"]
+
+        self._draw_plate_link(
+            p,
+            pts["wrist"],
+            wrist_end,
+            width=wrist_width,
+            thickness=wrist_thickness,
+            cx=cx,
+            cy=cy,
+            scale=scale,
+        )
+
+        # ---------------------------------------------------------------
+        # Wrist-roll housing
+        # ---------------------------------------------------------------
+
+        wr_center = _iso(
+            pts["claw_root"],
+            cx,
+            cy,
+            scale
+        )
+
+        p.setBrush(QBrush(QColor("#252629")))
+        p.setPen(QPen(QColor("#08090a"), 1.5))
+
+        p.drawEllipse(
+            wr_center,
+            13,
+            13
+        )
+
+        # Roll plate
+        p.setBrush(QBrush(QColor("#3a3b3f")))
+        p.drawEllipse(
+            wr_center,
+            9,
+            9
+        )
+
+        # Roll indicator
+        roll = math.radians(
+            self._current["wrist_r"] - 90.0
+        )
+
+        tick = QPointF(
+            wr_center.x() + 9 * math.cos(roll),
+            wr_center.y() - 9 * math.sin(roll),
+        )
+
+        p.setPen(
+            QPen(
+                QColor("#d0d0d0"),
+                2
+            )
+        )
+
         p.drawLine(wr_center, tick)
 
     # ---- Gripper --------------------------------------------------------
 
     def _draw_gripper(self, p, pts, cx, cy, scale):
+        """
+        Mechanical two-finger gripper.
+
+        claw = 0   -> open
+        claw = 60  -> closed
+        """
+
         forward = pts["wrist_dir"]
-        # side vector after yaw, sideways relative to forearm direction
-        yaw = pts["yaw"]
-        side = np.array([-math.sin(yaw), math.cos(yaw), 0.0])
 
-        claw_value = self._current["claw"]
-        spread = math.radians(40.0 - claw_value * 0.6)
+        # Wrist-roll-controlled sideways direction.
+        side = pts["gripper_side"]
 
-        # Knuckle (palm) plate just past the wrist roll
-        palm_back = pts["claw_root"]
-        palm_front = pts["claw_root"] + 0.08 * forward
-        self._link_tube(p, palm_back, palm_front,
-                        W_WRIST * 1.4, COLORS["claw"], yaw, cx, cy, scale)
+        # Make absolutely sure the side vector is perpendicular
+        # to the gripper's forward direction.
+        side = side - np.dot(side, forward) * forward
 
-        # Two finger assemblies
-        for sign in (-1, +1):
-            # finger pivot at edge of palm
-            pivot = palm_front + sign * (W_WRIST * 0.55) * side
+        side_norm = np.linalg.norm(side)
 
-            # finger direction = forward rotated by +/-spread around vertical
-            cos_s, sin_s = math.cos(spread), math.sin(spread)
-            finger_dir = (cos_s * forward) + (sign * sin_s * side)
+        if side_norm > 1e-9:
+            side = side / side_norm
+        else:
+            side = np.array([
+                0.0,
+                1.0,
+                0.0
+            ])
 
-            # Finger has two segments for a more mechanical look
-            seg1_end = pivot + (L_CLAW * 0.6) * finger_dir
-            seg2_end = seg1_end + (L_CLAW * 0.4) * finger_dir
+        # ---------------------------------------------------------------
+        # Gripper mounting plate
+        # ---------------------------------------------------------------
 
-            # First (thicker) segment
-            self._link_tube(p, pivot, seg1_end, W_WRIST * 0.75,
-                            COLORS["claw"], yaw, cx, cy, scale)
-            self._servo_housing(p, seg1_end, COLORS["claw"], 5,
-                                cx, cy, scale)
-            # Second (thinner) tip segment
-            self._link_tube(p, seg1_end, seg2_end, W_WRIST * 0.55,
-                            _shade(COLORS["claw"], 0.85).name(),
-                            yaw, cx, cy, scale)
-            # Pivot pin at the palm
-            self._servo_housing(p, pivot, COLORS["claw"], 4, cx, cy, scale)
+        root = pts["claw_root"]
+
+        palm_back = root
+        palm_front = root + 0.12 * forward
+
+        self._draw_plate_link(
+            p,
+            palm_back,
+            palm_front,
+            width=0.24,
+            thickness=0.08,
+            cx=cx,
+            cy=cy,
+            scale=scale,
+        )
+
+        # ---------------------------------------------------------------
+        # Continuous claw opening
+        # ---------------------------------------------------------------
+
+        claw = self._current["claw"]
+
+        # 38 degrees when fully open.
+        # 4 degrees when nearly closed.
+        spread = math.radians(
+            38.0 - claw * (34.0 / 60.0)
+        )
+
+        # ---------------------------------------------------------------
+        # Fingers
+        # ---------------------------------------------------------------
+
+        for sign in (-1, 1):
+            pivot = (
+                    palm_front
+                    + sign * 0.11 * side
+            )
+
+            cos_s = math.cos(spread)
+            sin_s = math.sin(spread)
+
+            finger_dir = (
+                    cos_s * forward
+                    + sign * sin_s * side
+            )
+
+            # Main finger
+            finger_end = (
+                    pivot
+                    + 0.27 * finger_dir
+            )
+
+            self._draw_plate_link(
+                p,
+                pivot,
+                finger_end,
+                width=0.075,
+                thickness=0.045,
+                cx=cx,
+                cy=cy,
+                scale=scale,
+            )
+
+            # Finger tip
+            tip_end = (
+                    finger_end
+                    + 0.12 * finger_dir
+            )
+
+            self._draw_plate_link(
+                p,
+                finger_end,
+                tip_end,
+                width=0.055,
+                thickness=0.035,
+                cx=cx,
+                cy=cy,
+                scale=scale,
+            )
+
+            # Pivot
+            pivot_screen = _iso(
+                pivot,
+                cx,
+                cy,
+                scale
+            )
+
+            p.setBrush(QBrush(QColor("#4c4d51")))
+            p.setPen(QPen(QColor("#090909"), 1.0))
+
+            p.drawEllipse(
+                pivot_screen,
+                4,
+                4
+            )
 
     # ---- HUD ------------------------------------------------------------
 

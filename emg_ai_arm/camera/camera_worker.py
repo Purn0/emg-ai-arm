@@ -5,11 +5,11 @@ import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from emg_ai_arm.camera.ml_gesture_recognizer import MLGestureRecognizer
-from emg_ai_arm.camera.gesture_mapper import gesture_to_prediction
+
 
 
 class CameraWorker(QThread):
-    prediction_ready = pyqtSignal(int, float)
+    prediction_ready = pyqtSignal(str, float)
     frame_ready = pyqtSignal(object)
     error = pyqtSignal(str)
 
@@ -51,11 +51,10 @@ class CameraWorker(QThread):
 
                     result = results[0]
 
-                    pred = gesture_to_prediction(result.gesture_name)
-
+                    gesture = result.gesture_name
                     strength = float(result.score)
 
-                    self.prediction_ready.emit(pred, strength)
+                    self.prediction_ready.emit(gesture, strength)
 
                 self.frame_ready.emit(frame)
 
