@@ -53,7 +53,7 @@ class SignalTab(QWidget):
 
         # ---- Plot ----
         self.plot = pg.PlotWidget()
-        self.plot.setYRange(0.0, 1.2)
+        self.plot.enableAutoRange(axis='y')
         self.plot.setLabel("left", "Amplitude")
         self.plot.setLabel("bottom", "Sample (last 8 s)")
         self.plot.showGrid(x=True, y=True, alpha=0.18)
@@ -82,6 +82,18 @@ class SignalTab(QWidget):
         self._timer.setInterval(int(1000 / REFRESH_HZ))
         self._timer.timeout.connect(self._redraw)
         self._timer.start()
+
+    def reset(self) -> None:
+        """Clear the rolling buffers. Call this whenever a new stream
+        starts - otherwise switching between sources with very different
+        signal scales (e.g. real EMG ~0.001 vs synthetic ~0.7) leaves old
+        stale values mixed with new ones, which forces the Y auto-range
+        to fight a huge spurious span every frame and tanks the fps."""
+        self._ch1 = deque([0.0] * HISTORY_LEN, maxlen=HISTORY_LEN)
+        self._ch2 = deque([0.0] * HISTORY_LEN, maxlen=HISTORY_LEN)
+        self._frames = 0
+        self._frame_t0 = time.perf_counter()
+        self.status.setText("Status: idle")
 
     # ------------------------------------------------------------------- #
     # Slots

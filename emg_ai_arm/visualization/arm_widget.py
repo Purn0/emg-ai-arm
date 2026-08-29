@@ -39,8 +39,8 @@ JOINTS = ("base", "shoulder", "elbow", "wrist_p", "wrist_r", "claw")
 # wrist_p=55 lets the claw drop further down.
 DEFAULTS = {
     "base":     90.0,
-    "shoulder": 135.0,
-    "elbow":    35.0,
+    "shoulder": 210.0,
+    "elbow":    0,
     "wrist_p":  55.0,
     "wrist_r":  90.0,
     "claw":     25.0,
@@ -48,9 +48,9 @@ DEFAULTS = {
 
 LIMITS = {
     "base":     (25.0, 155.0),
-    "shoulder": (55.0, 145.0),
-    "elbow":    (35.0, 145.0),
-    "wrist_p":  (45.0, 135.0),
+    "shoulder": (160.0, 210.0),   # was (55.0, 145.0)
+    "elbow":    (0, 40.0),     # was (35.0, 145.0)
+    "wrist_p":  (15.0, 95.0),     # was (45.0, 135.0)
     "wrist_r":  (20.0, 160.0),
     "claw":     (0.0, 60.0),
 }
@@ -287,39 +287,14 @@ class ArmWidget(QWidget):
         # Arm up — weighted 3-servo movement
         # ---------------------------------------------------------
         elif c.startswith("ARM_UP"):
-            self._target["shoulder"] = _clip(
-                "shoulder",
-                self._target["shoulder"] + step * 0.70
-            )
+            self._target["shoulder"] = _clip("shoulder", self._target["shoulder"] + step * 0.35)
+            self._target["elbow"] = _clip("elbow", self._target["elbow"] + step * 0.35)
+            self._target["wrist_p"] = _clip("wrist_p", self._target["wrist_p"] + step * 1.0)
 
-            self._target["elbow"] = _clip(
-                "elbow",
-                self._target["elbow"] + step * 0.60
-            )
-
-            self._target["wrist_p"] = _clip(
-                "wrist_p",
-                self._target["wrist_p"] + step * 0.40
-            )
-
-        # ---------------------------------------------------------
-        # Arm down — weighted 3-servo movement
-        # ---------------------------------------------------------
         elif c.startswith("ARM_DOWN"):
-            self._target["shoulder"] = _clip(
-                "shoulder",
-                self._target["shoulder"] - step * 0.70
-            )
-
-            self._target["elbow"] = _clip(
-                "elbow",
-                self._target["elbow"] - step * 0.60
-            )
-
-            self._target["wrist_p"] = _clip(
-                "wrist_p",
-                self._target["wrist_p"] - step * 0.40
-            )
+            self._target["shoulder"] = _clip("shoulder", self._target["shoulder"] - step * 0.35)
+            self._target["elbow"] = _clip("elbow", self._target["elbow"] - step * 0.35)
+            self._target["wrist_p"] = _clip("wrist_p", self._target["wrist_p"] - step * 1.0)
 
     def reset_pose(self):
         self._target = dict(DEFAULTS)

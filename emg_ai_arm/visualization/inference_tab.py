@@ -14,6 +14,7 @@ and sends:
 from __future__ import annotations
 
 import cv2
+import joblib
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QImage, QPixmap
@@ -29,7 +30,23 @@ from PyQt6.QtWidgets import (
 
 from emg_ai_arm.control.gesture_mapper import gesture_to_command
 from emg_ai_arm.control.robot_command import RobotCommand
+from emg_ai_arm.features.extract_features_8ch import extract_emg_features
+from emg_ai_arm.utils.config import MODELS_DIR
 from emg_ai_arm.visualization.arm_widget import ArmWidget
+
+
+# Class labels from the UCI "EMG data for gestures" dataset README
+# (classes 0-6 as used by rf_emg_best.joblib; class 7 "extended palm"
+# was excluded during training since not all subjects performed it).
+EMG_CLASS_NAMES = {
+    0: "Unmarked / rest",
+    1: "Hand at rest",
+    2: "Fist (clenched)",
+    3: "Wrist flexion",
+    4: "Wrist extension",
+    5: "Radial deviation",
+    6: "Ulnar deviation",
+}
 
 
 class InferenceTab(QWidget):
@@ -96,6 +113,7 @@ class InferenceTab(QWidget):
         self.pred_label = QLabel(
             "Prediction: —"
         )
+        self.pred_label.setWordWrap(True)
         self.pred_label.setFont(
             QFont(
                 "Segoe UI",
@@ -205,6 +223,12 @@ class InferenceTab(QWidget):
         # ---------------------------------------------------------
 
         self._history: list[str] = []
+
+        # Lazily-loaded EMG research model (rf_emg_best.joblib, 80
+        # features, classes 0-6). Loaded on first EMG window so the GUI
+        # still starts even if the model file is temporarily missing.
+        self._emg_clf = None
+        self._emg_load_error = None
 
         # ---------------------------------------------------------
         # Signals
@@ -349,6 +373,102 @@ class InferenceTab(QWidget):
                     self._history
                 )
             )
+        )
+
+    # ------------------------------------------------------------------
+    # EMG window (fake/synthetic or replay of a real recording)
+    # ------------------------------------------------------------------
+
+    def _ensure_emg_model(self):
+        if self._emg_clf is not None:
+            return self._emg_clf
+        if self._emg_load_error is not None:
+            raise self._emg_load_error
+
+        model_path = MODELS_DIR / "rf_emg_best.joblib"
+        try:
+            self._emg_clf = joblib.load(str(model_path))
+        except Exception as e:
+            self._emg_load_error = e
+            raise
+        return self._emg_clf
+
+    def process_emg_window(
+        self,
+        window,
+        true_label: int,
+        source_label: str = "EMG",
+    ):
+        """
+        window: ndarray (200, 8) from StreamWorker.window_ready
+        true_label: ground-truth class if known (replay), else -1
+        source_label: human-readable source, e.g.
+            "EMG (synthetic demo)" or "EMG (replay: subject 05, held-out)"
+        """
+
+        try:
+            clf = self._ensure_emg_model()
+            feats = extract_emg_features(window).reshape(1, -1)
+            pred = int(clf.predict(feats)[0])
+            proba = clf.predict_proba(feats)[0]
+            confidence = float(proba[pred])
+        except Exception as e:
+            self.pred_label.setText("Prediction: \u2014")
+            self.cmd_label.setText(f"EMG error: {e}")
+            self.mode_label.setText(f"Mode: {source_label}")
+            return
+
+        gesture_name = EMG_CLASS_NAMES.get(pred, f"class {pred}")
+
+        # RobotCommand values 0-6 map 1:1 onto the model's class labels.
+        cmd = RobotCommand(pred) if 0 <= pred <= 6 else RobotCommand.STOP
+
+        label_suffix = ""
+        if true_label is not None and true_label >= 0:
+            true_name = EMG_CLASS_NAMES.get(true_label, f"class {true_label}")
+            label_suffix = f"\n(true: {true_name})"
+
+        self.pred_label.setText(
+            f"Prediction: {gesture_name}{label_suffix}"
+        )
+
+        self.strength_label.setText(
+            f"Confidence: {confidence:.2f}"
+        )
+
+        self.cmd_label.setText(
+            f"Command: {cmd.name}"
+        )
+
+        self.mode_label.setText(
+            f"Mode: {source_label}"
+        )
+
+        self.arm.set_mode(source_label)
+        self.arm.set_command(cmd.name)
+
+        arm_speed = max(0.6, min(1.0, confidence * 1.5))
+
+        # Each EMG window represents a real burst of muscle activity, but
+        # process_emg_window only fires once per window (~once per second),
+        # unlike the camera path which calls apply_command many times per
+        # second while a gesture is held. A single call barely moves the
+        # arm, so repeat the command a few times to give a visible,
+        # proportionate movement per window.
+        if cmd != RobotCommand.STOP:
+            for _ in range(3):
+                self.arm.apply_command(cmd, speed=arm_speed)
+
+        history_suffix = ""
+        if true_label is not None and true_label >= 0:
+            true_name = EMG_CLASS_NAMES.get(true_label, f"class {true_label}")
+            history_suffix = f" (true:{true_name})"
+
+        self._history.append(f"{cmd.name}{history_suffix}")
+        self._history = self._history[-12:]
+
+        self.history.setText(
+            "\n".join(reversed(self._history))
         )
 
     # ------------------------------------------------------------------
