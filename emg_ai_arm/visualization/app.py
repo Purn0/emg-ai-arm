@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-
+from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self.combo_source = QComboBox()
         self.combo_source.addItems([
             "fake (emulator)",
+            "replay (CSV)",
             "serial (Arduino)",
             "camera (vision)"
         ])
@@ -120,15 +121,23 @@ class MainWindow(QMainWindow):
     def _start_stream(self):
         index = self.combo_source.currentIndex()
 
+        # Clear the live-signal plot buffers so a new source never starts
+        # out mixed with stale data (and scale) from whatever ran before.
+        self.tab_signal.reset()
+
         if index == 0:
             src = "fake"
 
         elif index == 1:
+            src = "replay"
+
+        elif index == 2:
             src = "serial"
 
         else:
             src = "camera"
         port = None
+        replay_path = None
         if src == "serial":
             port, ok = QInputDialog.getText(
                 self, "Serial port",
@@ -138,10 +147,20 @@ class MainWindow(QMainWindow):
             if not ok or not port:
                 return
 
+        elif src == "replay":
+            # Real held-out subject recording (subject 05 - never trained
+            # on by rf_emg_best.joblib, downloaded from the original UCI
+            # "EMG data for gestures" dataset).
+            replay_path = Path(__file__).resolve().parents[1] / "data" / "raw" / "subject05_session1.txt"
+
         if src == "camera":
             self.worker = CameraWorker()
         else:
-            self.worker = StreamWorker(source=src, port=port)
+            self.worker = StreamWorker(
+                source=src,
+                port=port,
+                replay_path=replay_path
+            )
         if src == "camera":
 
             self.worker.prediction_ready.connect(
@@ -166,8 +185,19 @@ class MainWindow(QMainWindow):
                 self.tab_trainer.on_window
             )
 
+            # Route EMG windows through the research RF -> RobotCommand ->
+            # arm pipeline. This is the connection that was missing before:
+            # window_ready previously only reached the Signal and Trainer
+            # tabs, never the Inference tab / arm.
+            emg_source_label = {
+                "fake": "EMG (synthetic demo)",
+                "replay": "EMG (replay: subject 05, held-out)",
+                "serial": "EMG (Arduino, live)",
+            }.get(src, "EMG")
+
             self.worker.window_ready.connect(
-                self.tab_inference.on_window
+                lambda window, label, _lbl=emg_source_label:
+                    self.tab_inference.process_emg_window(window, label, _lbl)
             )
 
             self.worker.error.connect(
