@@ -314,7 +314,7 @@ class ArmWidget(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         w, h = self.width(), self.height()
-        p.fillRect(0, 0, w, h, QColor("#161619"))
+        p.fillRect(0, 0, w, h, QColor("#f5f5f5"))
 
         split = int(w * 0.66)
         self._draw_iso_scene(p, 0, 0, split, h)
@@ -337,7 +337,7 @@ class ArmWidget(QWidget):
         self._draw_hud(p)
 
     def _draw_grid(self, p, cx, cy, scale):
-        p.setPen(QPen(QColor("#22222a"), 1))
+        p.setPen(QPen(QColor("#d0d0d5"), 1))
         n = 4
         step = 0.5
         for i in range(-n, n + 1):
@@ -978,20 +978,20 @@ class ArmWidget(QWidget):
 
     def _draw_hud(self, p):
         p.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-        p.setPen(QPen(QColor("#e8e8ea")))
+        p.setPen(QPen(QColor("#202024")))
         p.drawText(QPointF(14, 26), "Mode: " + self._mode_text)
         p.setFont(QFont("Segoe UI", 11))
-        p.setPen(QPen(QColor("#b0b0b6")))
+        p.setPen(QPen(QColor("#55555a")))
         p.drawText(QPointF(14, 48), "Cmd:  " + self._cmd_text)
 
     # ---- Gauges panel ---------------------------------------------------
 
     def _draw_gauges(self, p, x, y, w, h):
-        p.setPen(QPen(QColor("#22222a"), 1))
+        p.setPen(QPen(QColor("#d0d0d5"), 1))
         p.drawLine(x, y + 8, x, y + h - 8)
 
         p.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        p.setPen(QPen(QColor("#e8e8ea")))
+        p.setPen(QPen(QColor("#202024")))
         p.drawText(QPointF(x + 16, y + 28), "Servo angles")
 
         pad_x = 16
@@ -1004,11 +1004,11 @@ class ArmWidget(QWidget):
             by = start_y + i * block_h
 
             p.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-            p.setPen(QPen(QColor("#d6d6dc")))
+            p.setPen(QPen(QColor("#333338")))
             p.drawText(QPointF(gauge_x, by + 12), LABELS[name])
 
             p.setFont(QFont("Consolas", 9))
-            p.setPen(QPen(QColor("#9c9ca6")))
+            p.setPen(QPen(QColor("#5a5a60")))
             val_text = "%5.1f deg" % self._current[name]
             p.drawText(QPointF(gauge_x + gauge_w - 60, by + 12), val_text)
 
