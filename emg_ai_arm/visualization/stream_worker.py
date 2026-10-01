@@ -1,158 +1,67 @@
-"""Background worker producing fast sample chunks and classification windows."""
+"""Background thread that streams EMG windows from a replay or synthetic source."""
 
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from emg_ai_arm.emulator.fake_emg_8ch import stream_sequence, FS, SAMPLES
+from emg_ai_arm.acquisition.replay_csv_8ch import replay
+from emg_ai_arm.emulator.fake_emg_8ch import stream_sequence
 
-
+# Display pacing: samples are sent to the plot at this rate. The UCI files
+# hold about 967 samples per second, so a replay runs about 5x slower than
+# the recording, which keeps the arm motion easy to follow.
+PLAYBACK_RATE = 200
 CHUNK_SAMPLES = 5
 
 
 class StreamWorker(QThread):
     samples_ready = pyqtSignal(np.ndarray)
     window_ready = pyqtSignal(np.ndarray, int)
+    finished_stream = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, source="fake", port=None, replay_path=None, parent=None):
+    def __init__(self, source="replay", replay_path=None, window=200, parent=None):
         super().__init__(parent)
-
         self.source = source
-        self.port = port
         self.replay_path = replay_path
-
+        self.window = int(window)
         self._running = False
-
-        # FS/SAMPLES come from the 8-channel research pipeline (matches
-        # rf_emg_best.joblib: 200-sample windows). Both "fake" (synthetic
-        # demo signal) and "replay" (real held-out subject recording) use
-        # this same window size and pacing.
-        self.fs = FS
-        self.win_samples = SAMPLES
 
     def stop(self):
         self._running = False
 
-    def _create_generator(self):
-        """Create the selected EMG input generator."""
-
-        if self.source == "fake":
-            # Synthetic 8-channel demo signal. NOT physiological EMG -
-            # used only when no real recording is selected for replay.
-            return stream_sequence()
-
-        elif self.source == "serial":
-            from emg_ai_arm.acquisition.serial_reader import serial_windows
-
-            if not self.port:
-                raise RuntimeError(
-                    "Serial source requires a COM port."
-                )
-
-            return serial_windows(self.port)
-
-        elif self.source == "replay":
-            from emg_ai_arm.acquisition.replay_csv_8ch import replay
-
+    def _windows(self):
+        if self.source == "replay":
             if not self.replay_path:
-                raise RuntimeError(
-                    "Replay source requires a recording file."
-                )
-
-            path = Path(self.replay_path)
-
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"Replay file not found: {path}"
-                )
-
-            return replay(path)
-
-        else:
-            raise ValueError(
-                f"Unknown EMG source: {self.source!r}"
-            )
+                raise RuntimeError("the replay source needs a recording file")
+            return replay(self.replay_path, self.window)
+        if self.source == "synthetic":
+            return stream_sequence(self.window)
+        raise ValueError(f"unknown EMG source: {self.source!r}")
 
     def run(self):
+        """Stream until the source ends (then emit finished_stream), stop() or an error."""
         self._running = True
-
+        chunk_period = CHUNK_SAMPLES / PLAYBACK_RATE
         try:
-            gen = self._create_generator()
-
-            sample_period = 1.0 / float(self.fs)
-            chunk_period = sample_period * CHUNK_SAMPLES
-
-            while self._running:
-
-                window, label = next(gen)
-
-                window = np.asarray(
-                    window,
-                    dtype=np.float32
-                )
-
-                if window.ndim != 2:
-                    raise ValueError(
-                        f"Invalid EMG window shape: {window.shape}"
-                    )
-
-                if window.shape[0] == 0:
-                    continue
-
-                lab_int = (
-                    int(label)
-                    if label is not None
-                    else -1
-                )
-
-                n = window.shape[0]
-
-                # Stream the window in small chunks
-                for start in range(0, n, CHUNK_SAMPLES):
-
+            for window, label in self._windows():
+                if not self._running:
+                    return
+                for start in range(0, len(window), CHUNK_SAMPLES):
                     if not self._running:
-                        break
-
-                    end = min(
-                        start + CHUNK_SAMPLES,
-                        n
-                    )
-
-                    chunk = window[start:end]
-
+                        return
                     t0 = time.perf_counter()
-
-                    self.samples_ready.emit(
-                        chunk.copy()
-                    )
-
-                    elapsed = (
-                        time.perf_counter() - t0
-                    )
-
-                    remaining = (
-                        chunk_period - elapsed
-                    )
-
+                    self.samples_ready.emit(window[start:start + CHUNK_SAMPLES].copy())
+                    remaining = chunk_period - (time.perf_counter() - t0)
                     if remaining > 0:
                         time.sleep(remaining)
-
-                # Send the complete window
                 if self._running:
-                    self.window_ready.emit(
-                        window,
-                        lab_int
-                    )
-
-        except StopIteration:
-            # Replay reached the end of the file.
-            self._running = False
-
+                    self.window_ready.emit(window, int(label))
+            self.finished_stream.emit()
         except Exception as e:
-            self._running = False
             self.error.emit(str(e))
+        finally:
+            self._running = False

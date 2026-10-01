@@ -1,13 +1,9 @@
-"""Semi-3D isometric visualisation of the 6-DoF arm + claw.
+"""Isometric drawing of a simulated 6-DOF arm with a claw.
 
-Each link is drawn as a filled trapezoidal "tube" projected from 3D,
-with disc-shaped servo housings at every joint to give it the look of
-a real hobby kit arm. The right side of the widget shows live joint
-angle gauges, one per servo.
-
-DEFAULTS are set so the arm sits in a curled "C-shape" rest pose, the
-way a typical 6-DoF servo arm powers up. Tune DEFAULTS to match your
-specific physical arm if it parks in a different home position.
+Joint angles come from forward kinematics and are projected isometrically;
+links are drawn as tubes with a servo housing at each joint, and the right
+side shows one gauge per joint. Commands move joint targets within LIMITS;
+the displayed angles ease towards the targets on a 33 ms timer.
 
 Joints / servos
 ---------------
@@ -33,10 +29,7 @@ from PyQt6.QtWidgets import QWidget
 
 JOINTS = ("base", "shoulder", "elbow", "wrist_p", "wrist_r", "claw")
 
-# Rest position - tuned to look like a curled / hunched hobby arm.
-# shoulder=135 means upper arm rises ~45 deg from horizontal.
-# elbow=35  means a deep negative bend so the forearm tucks back-down.
-# wrist_p=55 lets the claw drop further down.
+# Rest pose (degrees).
 DEFAULTS = {
     "base":     90.0,
     "shoulder": 210.0,
@@ -48,9 +41,9 @@ DEFAULTS = {
 
 LIMITS = {
     "base":     (25.0, 155.0),
-    "shoulder": (160.0, 210.0),   # was (55.0, 145.0)
-    "elbow":    (0, 40.0),     # was (35.0, 145.0)
-    "wrist_p":  (15.0, 95.0),     # was (45.0, 135.0)
+    "shoulder": (160.0, 210.0),
+    "elbow":    (0.0, 40.0),
+    "wrist_p":  (15.0, 95.0),
     "wrist_r":  (20.0, 160.0),
     "claw":     (0.0, 60.0),
 }

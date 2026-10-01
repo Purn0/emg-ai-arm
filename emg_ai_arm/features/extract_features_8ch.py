@@ -1,17 +1,14 @@
 """
-80-feature extractor for the 8-channel research RF (rf_emg_best.joblib).
+The thesis feature extractor, one window at a time, as used for the thesis
+model (rf_emg_best.joblib). emg_features.thesis_features computes the same
+80 features for many windows at once (equal up to float32 rounding) and is
+what the app and experiments use.
 
-This is a SEPARATE module from extract_features.py (which is the
-7-feature/channel extractor used by the 2-channel placeholder pipeline).
-Do not merge them - the research RF was trained on exactly this function,
-verified against the Colab notebook (untitled3.py) that produced
-X_train_features / X_val_features / X_test_features.
-
-Feature order per channel (10 features, matches training exactly):
+Feature order per channel (10 features):
     mean, std, RMS, energy, min, max, peak-to-peak, median,
-    mean absolute value, zero crossings
+    mean absolute value, sign changes
 
-Input:  window of shape (200, 8)
+Input:  window of shape (n_samples, 8)
 Output: feature vector of shape (80,)
 """
 

@@ -1,11 +1,11 @@
+"""Background thread: webcam frames -> gesture predictions."""
+
 from __future__ import annotations
 
 import cv2
-
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from emg_ai_arm.camera.ml_gesture_recognizer import MLGestureRecognizer
-
 
 
 class CameraWorker(QThread):
@@ -15,7 +15,6 @@ class CameraWorker(QThread):
 
     def __init__(self, camera_index=0, parent=None):
         super().__init__(parent)
-
         self.camera_index = camera_index
         self.running = False
 
@@ -23,45 +22,30 @@ class CameraWorker(QThread):
         self.running = False
 
     def run(self):
-
         self.running = True
-
-        recognizer = MLGestureRecognizer()
-
-        cap = cv2.VideoCapture(self.camera_index)
-
-        if not cap.isOpened():
-            self.error.emit("Could not open camera.")
+        try:
+            recognizer = MLGestureRecognizer()
+        except Exception as e:
+            self.error.emit(f"Could not load the gesture model: {e}. "
+                            "Run `python -m experiments.train_models` first.")
             return
 
+        cap = cv2.VideoCapture(self.camera_index)
+        if not cap.isOpened():
+            self.error.emit("Could not open the camera.")
+            return
         try:
-
             while self.running:
-
                 ok, frame = cap.read()
-
                 if not ok:
                     continue
-
+                frame = cv2.flip(frame, 1)
                 raw, results = recognizer.process_with_raw(frame)
-
                 recognizer.draw_landmarks(frame, raw)
-
                 if results:
-
-                    result = results[0]
-
-                    gesture = result.gesture_name
-                    strength = float(result.score)
-
-                    self.prediction_ready.emit(gesture, strength)
-
+                    self.prediction_ready.emit(results[0].gesture_name, results[0].score)
                 self.frame_ready.emit(frame)
-
         except Exception as e:
-
             self.error.emit(str(e))
-
         finally:
-
             cap.release()

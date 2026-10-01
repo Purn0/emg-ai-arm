@@ -1,10 +1,8 @@
 """
-Tab 1 - live two-channel EMG signal viewer.
+Live signal tab: raw signal of the first two of the eight channels.
 
-Subscribes to the worker's fast `samples_ready` signal and appends new
-samples to a rolling buffer. A QTimer-driven redraw at 30 fps keeps the
-visual update rate independent of how fast samples arrive, so the plot
-always feels smooth.
+Samples arrive in small chunks from StreamWorker (paced at 200 samples/s)
+and go into a rolling buffer that a timer redraws at 30 fps.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ REFRESH_HZ = 30
 
 
 class SignalTab(QWidget):
-    """Displays a scrolling 2-channel EMG envelope at 30 fps."""
+    """Scrolling plot of channels 1 and 2."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -40,7 +38,7 @@ class SignalTab(QWidget):
 
         # ---- Header row ----
         header = QHBoxLayout()
-        title = QLabel("Live EMG envelope - 2 channels @ 200 Hz")
+        title = QLabel("Raw EMG, channels 1 and 2 of 8")
         title.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
         header.addWidget(title)
         header.addStretch(1)
@@ -84,11 +82,8 @@ class SignalTab(QWidget):
         self._timer.start()
 
     def reset(self) -> None:
-        """Clear the rolling buffers. Call this whenever a new stream
-        starts - otherwise switching between sources with very different
-        signal scales (e.g. real EMG ~0.001 vs synthetic ~0.7) leaves old
-        stale values mixed with new ones, which forces the Y auto-range
-        to fight a huge spurious span every frame and tanks the fps."""
+        """Clear the buffers when a stream starts, so sources of very
+        different scale (recorded EMG ~0.001, synthetic ~0.7) never mix."""
         self._ch1 = deque([0.0] * HISTORY_LEN, maxlen=HISTORY_LEN)
         self._ch2 = deque([0.0] * HISTORY_LEN, maxlen=HISTORY_LEN)
         self._frames = 0
@@ -100,14 +95,14 @@ class SignalTab(QWidget):
     # ------------------------------------------------------------------- #
 
     def on_samples(self, chunk: np.ndarray) -> None:
-        """Worker delivers small chunks (5 samples) at ~40 Hz."""
+        """Chunks of 5 samples, 40 per second."""
         n = chunk.shape[0]
         for i in range(n):
             self._ch1.append(float(chunk[i, 0]))
             self._ch2.append(float(chunk[i, 1]))
 
     def on_window(self, window: np.ndarray, true_label: int) -> None:
-        """Slow per-window callback - just used to update the status row."""
+        """Once per window: update the status row."""
         label_text = f"true label = {true_label}" if true_label >= 0 else ""
         self.status.setText(
             f"CH1 mean={window[:, 0].mean():.3f}    "

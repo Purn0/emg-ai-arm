@@ -1,21 +1,34 @@
-"""Main PyQt6 entry point for the EMG-AI-Arm GUI."""
+"""EMG-AI-Arm GUI: python -m emg_ai_arm.visualization.app"""
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QInputDialog, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QStatusBar, QTabWidget, QToolBar,
+    QApplication, QComboBox, QLabel, QMainWindow, QMessageBox, QPushButton,
+    QStatusBar, QTabWidget, QToolBar,
 )
 
+from emg_ai_arm.camera.camera_worker import CameraWorker
+from emg_ai_arm.emg_model import calibrate_from_file
+from emg_ai_arm.utils.config import RAW_DIR
 from emg_ai_arm.visualization.inference_tab import InferenceTab
 from emg_ai_arm.visualization.signal_tab import SignalTab
 from emg_ai_arm.visualization.stream_worker import StreamWorker
-from emg_ai_arm.visualization.trainer_tab import TrainerTab
-from emg_ai_arm.camera.camera_worker import CameraWorker
+
+# Subject 05 of the UCI dataset. The app's EMG model is trained without this
+# subject, so the replay is a test on an unseen person; session 2 serves as
+# the unlabelled calibration recording when the model needs one.
+REPLAY_FILE = RAW_DIR / "subject05_session1.txt"
+CALIBRATION_FILE = RAW_DIR / "subject05_session2.txt"
+
+SOURCES = [
+    ("Replay: recorded EMG (subject 05)", "replay"),
+    ("Synthetic EMG (smoke test only)", "synthetic"),
+    ("Camera", "camera"),
+]
 
 DARK_STYLESHEET = """
 QTabWidget::pane { border: 1px solid #2a2a30; top: -1px; }
@@ -33,7 +46,7 @@ QPushButton {
 }
 QPushButton:hover { background: #34343c; }
 QPushButton:disabled { color: #6a6a72; background: #232328; }
-QComboBox, QSpinBox {
+QComboBox {
     background: #26262b; color: #e8e8ea;
     border: 1px solid #3a3a44; padding: 4px 8px; border-radius: 3px;
 }
@@ -44,11 +57,6 @@ QGroupBox {
 QGroupBox::title {
     subcontrol-origin: margin; left: 10px; padding: 0 6px; color: #b0b0b6;
 }
-QProgressBar {
-    background: #26262b; border: 1px solid #3a3a44;
-    border-radius: 4px; text-align: center; color: #e8e8ea;
-}
-QProgressBar::chunk { background: #4ec9b0; border-radius: 3px; }
 QToolBar { background: #1a1a1f; border: none; spacing: 6px; padding: 4px; }
 QStatusBar { background: #1a1a1f; color: #b0b0b6; }
 QLabel { color: #d6d6dc; }
@@ -58,17 +66,15 @@ QLabel { color: #d6d6dc; }
 def apply_dark_palette(app):
     app.setStyle("Fusion")
     pal = QPalette()
-    pal.setColor(QPalette.ColorRole.Window, QColor("#1e1e22"))
-    pal.setColor(QPalette.ColorRole.WindowText, QColor("#e8e8ea"))
-    pal.setColor(QPalette.ColorRole.Base, QColor("#26262b"))
-    pal.setColor(QPalette.ColorRole.AlternateBase, QColor("#2a2a30"))
-    pal.setColor(QPalette.ColorRole.Text, QColor("#e8e8ea"))
-    pal.setColor(QPalette.ColorRole.Button, QColor("#2a2a30"))
-    pal.setColor(QPalette.ColorRole.ButtonText, QColor("#e8e8ea"))
-    pal.setColor(QPalette.ColorRole.Highlight, QColor("#4ec9b0"))
-    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#1a1a1f"))
-    pal.setColor(QPalette.ColorRole.ToolTipBase, QColor("#1a1a1f"))
-    pal.setColor(QPalette.ColorRole.ToolTipText, QColor("#e8e8ea"))
+    for role, color in (
+        (QPalette.ColorRole.Window, "#1e1e22"), (QPalette.ColorRole.WindowText, "#e8e8ea"),
+        (QPalette.ColorRole.Base, "#26262b"), (QPalette.ColorRole.AlternateBase, "#2a2a30"),
+        (QPalette.ColorRole.Text, "#e8e8ea"), (QPalette.ColorRole.Button, "#2a2a30"),
+        (QPalette.ColorRole.ButtonText, "#e8e8ea"), (QPalette.ColorRole.Highlight, "#4ec9b0"),
+        (QPalette.ColorRole.HighlightedText, "#1a1a1f"), (QPalette.ColorRole.ToolTipBase, "#1a1a1f"),
+        (QPalette.ColorRole.ToolTipText, "#e8e8ea"),
+    ):
+        pal.setColor(role, QColor(color))
     app.setPalette(pal)
     app.setStyleSheet(DARK_STYLESHEET)
 
@@ -76,34 +82,24 @@ def apply_dark_palette(app):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EMG-AI-Arm  -  control panel")
+        self.setWindowTitle("EMG-AI-Arm")
         self.resize(1280, 820)
 
         self.tab_signal = SignalTab()
-        self.tab_trainer = TrainerTab()
         self.tab_inference = InferenceTab()
-
         tabs = QTabWidget()
-        tabs.addTab(self.tab_signal, "1  Live signal")
-        tabs.addTab(self.tab_trainer, "2  Trainer")
-        tabs.addTab(self.tab_inference, "3  Inference + arm")
+        tabs.addTab(self.tab_signal, "Live signal")
+        tabs.addTab(self.tab_inference, "Inference + arm")
         self.setCentralWidget(tabs)
 
         toolbar = QToolBar("Source")
         toolbar.setMovable(False)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
-
         toolbar.addWidget(QLabel("   Source: "))
         self.combo_source = QComboBox()
-        self.combo_source.addItems([
-            "fake (emulator)",
-            "replay (CSV)",
-            "serial (Arduino)",
-            "camera (vision)"
-        ])
+        self.combo_source.addItems([label for label, _ in SOURCES])
         toolbar.addWidget(self.combo_source)
-
-        self.btn_start = QPushButton("Start stream")
+        self.btn_start = QPushButton("Start")
         self.btn_stop = QPushButton("Stop")
         self.btn_stop.setEnabled(False)
         toolbar.addWidget(self.btn_start)
@@ -114,103 +110,55 @@ class MainWindow(QMainWindow):
         self.status.showMessage("Pick a source and press Start.")
 
         self.worker = None
+        self.btn_start.clicked.connect(self._start)
+        self.btn_stop.clicked.connect(self._stop)
 
-        self.btn_start.clicked.connect(self._start_stream)
-        self.btn_stop.clicked.connect(self._stop_stream)
-
-    def _start_stream(self):
-        index = self.combo_source.currentIndex()
-
-        # Clear the live-signal plot buffers so a new source never starts
-        # out mixed with stale data (and scale) from whatever ran before.
+    def _start(self):
+        label, source = SOURCES[self.combo_source.currentIndex()]
         self.tab_signal.reset()
-
-        if index == 0:
-            src = "fake"
-
-        elif index == 1:
-            src = "replay"
-
-        elif index == 2:
-            src = "serial"
-
-        else:
-            src = "camera"
-        port = None
-        replay_path = None
-        if src == "serial":
-            port, ok = QInputDialog.getText(
-                self, "Serial port",
-                "Arduino COM port (e.g. COM7):",
-                text="COM3",
-            )
-            if not ok or not port:
-                return
-
-        elif src == "replay":
-            # Real held-out subject recording (subject 05 - never trained
-            # on by rf_emg_best.joblib, downloaded from the original UCI
-            # "EMG data for gestures" dataset).
-            replay_path = Path(__file__).resolve().parents[1] / "data" / "raw" / "subject05_session1.txt"
-
-        if src == "camera":
-            self.worker = CameraWorker()
-        else:
-            self.worker = StreamWorker(
-                source=src,
-                port=port,
-                replay_path=replay_path
-            )
-        if src == "camera":
-
-            self.worker.prediction_ready.connect(
-                self.tab_inference.process_gesture
-            )
-            self.worker.frame_ready.connect(
-                self.tab_inference.update_camera_frame
-            )
-            self.worker.error.connect(self._on_worker_error)
-
-        else:
-
-            self.worker.samples_ready.connect(
-                self.tab_signal.on_samples
-            )
-
-            self.worker.window_ready.connect(
-                self.tab_signal.on_window
-            )
-
-            self.worker.window_ready.connect(
-                self.tab_trainer.on_window
-            )
-
-            # Route EMG windows through the research RF -> RobotCommand ->
-            # arm pipeline. This is the connection that was missing before:
-            # window_ready previously only reached the Signal and Trainer
-            # tabs, never the Inference tab / arm.
-            emg_source_label = {
-                "fake": "EMG (synthetic demo)",
-                "replay": "EMG (replay: subject 05, held-out)",
-                "serial": "EMG (Arduino, live)",
-            }.get(src, "EMG")
-
-            self.worker.window_ready.connect(
-                lambda window, label, _lbl=emg_source_label:
-                    self.tab_inference.process_emg_window(window, label, _lbl)
-            )
-
-            self.worker.error.connect(
-                self._on_worker_error
-            )
+        try:
+            if source == "camera":
+                self.tab_inference.start_stream()
+                self.worker = CameraWorker()
+                self.worker.prediction_ready.connect(self.tab_inference.process_gesture)
+                self.worker.frame_ready.connect(self.tab_inference.update_camera_frame)
+            else:
+                self.worker = self._emg_worker(source, label)
+        except Exception as e:
+            QMessageBox.critical(self, "Cannot start", str(e))
+            return
+        self.worker.error.connect(self._on_worker_error)
         self.worker.start()
-
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.combo_source.setEnabled(False)
-        self.status.showMessage("Streaming from " + src + " ...")
+        self.status.showMessage(f"Streaming: {label}")
 
-    def _stop_stream(self):
+    def _emg_worker(self, source, label):
+        model = self.tab_inference.emg_model()
+        calibration = None
+        if source == "replay":
+            needed = [REPLAY_FILE] + ([CALIBRATION_FILE] if model.calibration else [])
+            missing = [str(p) for p in needed if not p.exists()]
+            if missing:
+                raise FileNotFoundError("Missing " + ", ".join(missing) +
+                                        "; run `python -m experiments.download_data`.")
+            if model.calibration:
+                calibration = calibrate_from_file(model, CALIBRATION_FILE)
+        self.tab_inference.start_stream(calibration)
+        worker = StreamWorker(source=source, replay_path=REPLAY_FILE, window=model.window)
+        worker.samples_ready.connect(self.tab_signal.on_samples)
+        worker.window_ready.connect(self.tab_signal.on_window)
+        worker.window_ready.connect(
+            lambda window, true_label: self.tab_inference.process_emg_window(window, true_label, label))
+        worker.finished_stream.connect(self._on_replay_finished)
+        return worker
+
+    def _on_replay_finished(self):
+        self._stop()
+        self.status.showMessage("Replay finished. " + self.tab_inference.score_label.text())
+
+    def _stop(self):
         if self.worker:
             self.worker.stop()
             self.worker.wait(2000)
@@ -221,19 +169,19 @@ class MainWindow(QMainWindow):
         self.status.showMessage("Stopped.")
 
     def _on_worker_error(self, msg):
-        self._stop_stream()
+        self._stop()
         QMessageBox.critical(self, "Stream error", msg)
 
     def closeEvent(self, event):
-        self._stop_stream()
+        self._stop()
         event.accept()
 
 
 def main():
     app = QApplication(sys.argv)
     apply_dark_palette(app)
-    w = MainWindow()
-    w.show()
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec())
 
 
