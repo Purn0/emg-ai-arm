@@ -1,77 +1,28 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 
 # Virtual environments
 .venv/
 venv/
-env/
-ENV/
 
-# IDE
+# IDE / OS
 .idea/
 .vscode/
-*.swp
-*.swo
 .DS_Store
-
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-*.egg
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Model artifacts & data (track in releases, not in repo)
-*.joblib
-*.pkl
-*.pth
-*.pt
-*.h5
-*.onnx
-emg_ai_arm/models/*.joblib
-emg_ai_arm/data/raw/*
-emg_ai_arm/data/windows/*
-!emg_ai_arm/data/raw/.gitkeep
-!emg_ai_arm/data/windows/.gitkeep
-
-# Logs and experiment outputs
-*.log
-runs/
-logs/
-results/
-
-# OS
 Thumbs.db
 desktop.ini
 
-# LaTeX build artifacts
-paper/*.aux
-paper/*.log
-paper/*.out
-paper/*.bbl
-paper/*.blg
-paper/*.synctex.gz
-paper/*.toc
-paper/*.fls
-paper/*.fdb_latexmk
+# Downloaded data (python -m experiments.download_data)
+data/
+emg_ai_arm/data/
 
-# Secrets
-.env
-*.secret
+# Trained models (python -m experiments.train_models)
+*.joblib
+*.pkl
+*.pt
+emg_ai_arm/camera_models/
 
-# Personal working files
-HANDOFF.md
-SKILL_REFRESHER.md
-tree.txt
-Total.zip
-Muhtasim_Al_Ahsan_Academic_CV.docx
-
-# Camera models (we'll distribute separately if needed)
-emg_ai_arm/camera_models/emg_ai_arm.zip
-emg_ai_arm.zip 
+# Local archives and scratch output
+*.zip
+experiments/results_old/
