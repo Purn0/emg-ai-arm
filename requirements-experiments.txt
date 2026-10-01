@@ -1,0 +1,8 @@
+# Extra packages for experiments/benchmark.py (gradient boosting, CNN) and the figures.
+# CPU-only PyTorch: pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+matplotlib==3.11.1
+scipy==1.17.1
+xgboost==3.2.0
+lightgbm==4.7.0
+torch==2.14.1
