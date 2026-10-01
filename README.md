@@ -46,9 +46,10 @@ What matters most:
   gradient boosting and a 1D CNN change the results far less.
 
 In the dataset, a subject's two sessions were recorded 1-3 minutes apart
-without removing the bracelet, so calibrating from the other session is the
-favourable same-sitting case; it does not test re-donning the bracelet or
-recording on another day.
+(going by the times in the file names), probably without taking the bracelet
+off, so calibrating from the other session is the favourable same-sitting
+case; it does not test putting the bracelet back on or recording on another
+day.
 
 Camera: 96.9 % on 32 held-out capture bursts, 97.0 +- 2.5 % in 5x5
 burst-grouped cross-validation (see gesture-control-project).
